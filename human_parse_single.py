@@ -57,11 +57,12 @@ def main():
     else:
         # Fallback: call CIHP_PGN/test_pgn.py as a subprocess, but this will fail if the top-level bug is present
         cihp_pgn_script = os.path.expanduser('~/CIHP_PGN/test_pgn.py')
+        cihp_pgn_dir = os.path.expanduser('~/CIHP_PGN')
         subprocess.run([
             'conda', 'run', '-n', 'cihp_pgn', 'python', cihp_pgn_script,
             '--image', args.image,
             '--output', args.output
-        ], check=True)
+        ], check=True, cwd=cihp_pgn_dir)
 
 if __name__ == '__main__':
     main() 

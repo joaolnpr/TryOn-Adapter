@@ -151,13 +151,20 @@ def run_human_parser(input_image_path, output_mask_path):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     shutil.copy2(input_image_path, os.path.join(DATASETS_DIR, "input.jpg"))
 
-    # Run the parser
-    print("Running CIHP_PGN human parser...")
+    # Build the command to activate the cihp_pgn environment and run the parser
+    command = (
+        "source activate cihp_pgn && "
+        "python test_pgn.py && "
+        "source deactivate"
+    )
+    print("Running CIHP_PGN human parser in cihp_pgn environment...")
     result = subprocess.run(
-        ["python", "test_pgn.py"],
+        command,
         cwd=CIHP_PGN_DIR,
+        shell=True,
         capture_output=True,
-        text=True
+        text=True,
+        executable='/bin/bash'
     )
     print(result.stdout)
     if result.returncode != 0:

@@ -10,7 +10,7 @@ try:
     sys.path.append(os.path.expanduser('~/CIHP_PGN'))
     from utils import decode_labels, PGNModel, load
     import tensorflow as tf
-    N_CLASSES = 20
+    N_CLASSES = 20 # 20 classes for CIHP_PGN
     RESTORE_FROM = os.path.expanduser('~/CIHP_PGN/checkpoint/CIHP_pgn')
     def run_single_image(image_path, output_path):
         img = Image.open(image_path).convert('RGB')

@@ -152,15 +152,27 @@ def run_human_parser(input_image_path, output_mask_path):
     shutil.copy2(input_image_path, os.path.join(DATASETS_DIR, "input.jpg"))
 
     # Run the parser
-    subprocess.run(
+    print("Running CIHP_PGN human parser...")
+    result = subprocess.run(
         ["python", "test_pgn.py"],
         cwd=CIHP_PGN_DIR,
-        check=True
+        capture_output=True,
+        text=True
     )
+    print(result.stdout)
+    if result.returncode != 0:
+        print(result.stderr)
+        raise RuntimeError("CIHP_PGN parser failed!")
 
-    # The output mask will be in OUTPUT_DIR, named something like 'input.png'
+    # The output mask will be in OUTPUT_DIR, named 'input.png'
     mask_path = os.path.join(OUTPUT_DIR, "input.png")
+    if not os.path.exists(mask_path):
+        raise FileNotFoundError(f"Parser did not create mask: {mask_path}")
+
+    # Copy mask to TryOn-Adapter temp dataset
+    os.makedirs(os.path.dirname(output_mask_path), exist_ok=True)
     shutil.copy2(mask_path, output_mask_path)
+    print(f"Mask created and copied to: {output_mask_path}")
 
     # Clean up (optional)
     os.remove(os.path.join(DATASETS_DIR, "input.jpg"))
@@ -321,6 +333,14 @@ def main():
 
     seed_everything(opt.seed)
 
+    # Generate the segmentation mask if it doesn't exist
+    parse_mask_path = os.path.join(opt.dataroot, "test", "image-parse-v3", "test_001.png")
+    person_img_path = os.path.join(opt.dataroot, "test", "image", "test_001.jpg")
+    if not os.path.exists(parse_mask_path):
+        run_human_parser(person_img_path, parse_mask_path)
+    if not os.path.exists(parse_mask_path):
+        raise FileNotFoundError(f"Mask was not created: {parse_mask_path}")
+
     if torch.cuda.is_available():
         device = torch.device("cuda:{}".format(opt.gpu_id))
         torch.cuda.set_device(int(opt.gpu_id))
@@ -331,6 +351,7 @@ def main():
     version = opt.config.split('/')[-1].split('.')[0]
     model = load_model_from_config(config, f"{opt.ckpt}")
     # model = model.to(device)
+
     dataset = CPDataset(opt.dataroot, opt.H, mode='test', unpaired=opt.unpaired)
     loader = DataLoader(dataset, batch_size=opt.n_samples, shuffle=False, num_workers=4, pin_memory=True)
 

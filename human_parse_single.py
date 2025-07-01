@@ -47,6 +47,36 @@ except Exception as e:
     print("Could not import CIHP_PGN modules directly, will fallback to subprocess.")
     run_single_image = None
 
+def run_cihp_pgn_mask(person_img_path, output_mask_path):
+    import uuid
+    import shutil
+    # 1. Create temp dirs
+    temp_id = str(uuid.uuid4())
+    temp_input_dir = f"/tmp/cihp_input_{temp_id}"
+    temp_output_dir = f"/tmp/cihp_output_{temp_id}"
+    os.makedirs(temp_input_dir, exist_ok=True)
+    os.makedirs(temp_output_dir, exist_ok=True)
+    # 2. Copy person image to temp input dir
+    base_name = os.path.basename(person_img_path)
+    temp_input_img = os.path.join(temp_input_dir, base_name)
+    shutil.copy2(person_img_path, temp_input_img)
+    # 3. Run inf_pgn.py
+    cihp_pgn_dir = os.path.expanduser('~/CIHP_PGN')
+    cihp_pgn_script = os.path.join(cihp_pgn_dir, 'inf_pgn.py')
+    subprocess.run([
+        'conda', 'run', '-n', 'cihp_pgn', 'python', cihp_pgn_script,
+        '-i', temp_input_dir,
+        '-o', temp_output_dir
+    ], check=True, cwd=cihp_pgn_dir)
+    # 4. Move output mask to expected location
+    mask_name = os.path.splitext(base_name)[0] + '.png'
+    temp_mask_path = os.path.join(temp_output_dir, mask_name)
+    os.makedirs(os.path.dirname(output_mask_path), exist_ok=True)
+    shutil.move(temp_mask_path, output_mask_path)
+    # 5. Cleanup
+    shutil.rmtree(temp_input_dir)
+    shutil.rmtree(temp_output_dir)
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--image', type=str, required=True, help='Path to input image')
@@ -55,14 +85,7 @@ def main():
     if run_single_image is not None:
         run_single_image(args.image, args.output)
     else:
-        # Fallback: call CIHP_PGN/test_pgn.py as a subprocess, but this will fail if the top-level bug is present
-        cihp_pgn_script = os.path.expanduser('~/CIHP_PGN/test_pgn.py')
-        cihp_pgn_dir = os.path.expanduser('~/CIHP_PGN')
-        subprocess.run([
-            'conda', 'run', '-n', 'cihp_pgn', 'python', cihp_pgn_script,
-            '--image', args.image,
-            '--output', args.output
-        ], check=True, cwd=cihp_pgn_dir)
+        run_cihp_pgn_mask(args.image, args.output)
 
 if __name__ == '__main__':
     main() 

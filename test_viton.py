@@ -89,7 +89,8 @@ def load_model_from_config(config, ckpt, verbose=False):
         print("unexpected keys:")
         print(u)
 
-    model.cuda()
+    if torch.cuda.is_available():
+        model.cuda()
     model.eval()
     return model
 
@@ -329,7 +330,8 @@ def main():
     emasac_sd = torch.load(os.path.join(opt.ckpt_elbm_path,'emasc_40000.pth'))
     emasc.load_state_dict(emasac_sd)
 
-    emasc.cuda()
+    if torch.cuda.is_available():
+        emasc.cuda()
     emasc.eval()
     if opt.plms:
         sampler = PLMSSampler(model)
@@ -348,7 +350,8 @@ def main():
     
     # up = nn.Upsample(size=(opt.load_height, opt.load_width), mode='bilinear')
     gauss = tgm.image.GaussianBlur((15, 15), (3, 3))
-    gauss.cuda()
+    if torch.cuda.is_available():
+        gauss.cuda()
 
     iterator = tqdm(loader, desc='Test Dataset', total=len(loader))
     precision_scope = autocast if opt.precision == "autocast" else nullcontext
@@ -398,8 +401,8 @@ def main():
                     c = torch.cat([c, patches], dim=1)
                  
                     down_block_additional_residuals = list()
-                    mask_resduial = model.adapter_mask(parse_agnostic.cuda())
-                    sobel_resduial = model.adapter_canny(sobel_img.cuda())
+                    mask_resduial = model.adapter_mask(parse_agnostic.to(device))
+                    sobel_resduial = model.adapter_canny(sobel_img.to(device))
                     
                     for i in range(len(mask_resduial)):
                         down_block_additional_residuals.append(torch.cat([mask_resduial[i].unsqueeze(0), sobel_resduial[i].unsqueeze(0)],dim=0)) 
@@ -430,11 +433,11 @@ def main():
                                                      use_T_repaint = opt.use_T_repaint,
                                                      test_model_kwargs=test_model_kwargs)
                     samples_ddim = 1/ 0.18215 * samples_ddim
-                    _, intermediate_features = model.vae.encode(data["im_mask"].cuda())
+                    _, intermediate_features = model.vae.encode(data["im_mask"].to(device))
                     intermediate_features = [intermediate_features[i] for i in int_layers]
                     # Use EMASC
                     processed_intermediate_features = emasc(intermediate_features)
-                    processed_intermediate_features = mask_features(processed_intermediate_features,(1- data["inpaint_mask"]).cuda())
+                    processed_intermediate_features = mask_features(processed_intermediate_features,(1- data["inpaint_mask"]).to(device))
                     processed_intermediate_features = processed_intermediate_features #* 0.18215
                     x_samples_ddim = model.vae.decode(samples_ddim, processed_intermediate_features, int_layers).sample
                     x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)

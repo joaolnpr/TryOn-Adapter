@@ -139,8 +139,8 @@ def get_tensor_clip(normalize=True, toTensor=True):
 
 def run_human_parser(input_image_path, output_mask_path):
     # Path to the CIHP_PGN repo and pretrained model
-    CIHP_PGN_DIR = "/absolute/path/to/CIHP_PGN"
-    MODEL_PATH = "/absolute/path/to/CIHP_PGN/checkpoint/CIHP_pgn.pth"
+    CIHP_PGN_DIR = "/home/paperspace/CIHP_PGN"
+    MODEL_PATH = "/home/paperspace/CIHP_PGN/checkpoint/CIHP_pgn.pth"
     OUTPUT_DIR = os.path.dirname(output_mask_path)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 

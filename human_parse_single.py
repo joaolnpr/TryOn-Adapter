@@ -70,7 +70,9 @@ def run_cihp_pgn_mask(person_img_path, output_mask_path):
     ], check=True, cwd=cihp_pgn_dir)
     # 4. Move output mask to expected location
     mask_name = os.path.splitext(base_name)[0] + '.png'
-    temp_mask_path = os.path.join(temp_output_dir, mask_name)
+    temp_mask_path = os.path.join(temp_output_dir, 'cihp_parsing_maps', mask_name)
+    if not os.path.exists(temp_mask_path):
+        raise FileNotFoundError(f"Expected mask not found: {temp_mask_path}")
     os.makedirs(os.path.dirname(output_mask_path), exist_ok=True)
     shutil.move(temp_mask_path, output_mask_path)
     # 5. Cleanup

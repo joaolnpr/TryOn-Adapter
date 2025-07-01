@@ -168,8 +168,7 @@ def run_human_parser(input_image_path, output_mask_path):
         raise
 
     # Use conda run to execute in the correct environment
-    command = [
-        "sudo", "conda", "run", "-n", "cihp_pgn", "python", "test_pgn.py"
+    command = [ "conda", "run", "-n", "cihp_pgn", "python", "test_pgn.py"
     ]
     logging.info(f"Running CIHP_PGN human parser in cihp_pgn environment with command: {' '.join(command)}")
     result = subprocess.run(

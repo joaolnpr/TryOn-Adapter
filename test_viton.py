@@ -290,8 +290,11 @@ def main():
 
     seed_everything(opt.seed)
 
-    device = torch.device("cuda:{}".format(opt.gpu_id)) if torch.cuda.is_available() else torch.device("cpu")
-    torch.cuda.set_device(device)
+    if torch.cuda.is_available():
+        device = torch.device("cuda:{}".format(opt.gpu_id))
+        torch.cuda.set_device(int(opt.gpu_id))
+    else:
+        device = torch.device("cpu")
 
     config = OmegaConf.load(f"{opt.config}")
     version = opt.config.split('/')[-1].split('.')[0]

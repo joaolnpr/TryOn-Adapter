@@ -33,6 +33,7 @@ from torchvision.transforms import Resize
 
 from torch.nn import functional as F
 import subprocess
+import shutil
 
 def load_checkpoint(model, checkpoint_path):
     if not os.path.exists(checkpoint_path):
@@ -138,19 +139,32 @@ def get_tensor_clip(normalize=True, toTensor=True):
 
 
 def run_human_parser(input_image_path, output_mask_path):
-    # Path to the CIHP_PGN repo and pretrained model
-    CIHP_PGN_DIR = "/home/paperspace/CIHP_PGN"
-    MODEL_PATH = "/home/paperspace/CIHP_PGN/checkpoint/CIHP_pgn.pth"
-    OUTPUT_DIR = os.path.dirname(output_mask_path)
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    HOME = os.path.expanduser("~")
+    CIHP_PGN_DIR = os.path.join(HOME, "CIHP_PGN")
+    CHECKPOINT_DIR = os.path.join(HOME, "checkpoint")
+    DATASETS_DIR = os.path.join(HOME, "datasets")
+    OUTPUT_DIR = os.path.join(HOME, "output")
 
-    # Call the CIHP_PGN inference script
-    subprocess.run([
-        "python", os.path.join(CIHP_PGN_DIR, "simple_inference.py"),
-        "--model_path", MODEL_PATH,
-        "--input_image", input_image_path,
-        "--output_path", output_mask_path
-    ], check=True)
+    # Prepare input
+    os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+    os.makedirs(DATASETS_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    shutil.copy2(input_image_path, os.path.join(DATASETS_DIR, "input.jpg"))
+
+    # Run the parser
+    subprocess.run(
+        ["python", "test_pgn.py"],
+        cwd=CIHP_PGN_DIR,
+        check=True
+    )
+
+    # The output mask will be in OUTPUT_DIR, named something like 'input.png'
+    mask_path = os.path.join(OUTPUT_DIR, "input.png")
+    shutil.copy2(mask_path, output_mask_path)
+
+    # Clean up (optional)
+    os.remove(os.path.join(DATASETS_DIR, "input.jpg"))
+    os.remove(mask_path)
 
 def main():
     parser = argparse.ArgumentParser()

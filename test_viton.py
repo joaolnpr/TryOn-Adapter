@@ -232,6 +232,15 @@ def run_single_pair(person_image_path, cloth_image_path, output_path, config_pat
     # Create test_pairs.txt
     with open(os.path.join(temp_dataset_dir, "test_pairs.txt"), "w") as f:
         f.write(f"{test_id}.jpg {test_id}.jpg\n")
+    # Generate human parsing mask using CIHP_PGN
+    parse_mask_path = os.path.join(temp_dataset_dir, "test", "image-parse-v3", f"{test_id}.png")
+    cihp_pgn_script = os.path.expanduser("~/CIHP_PGN/test_pgn.py")
+    person_img_for_parser = os.path.join(temp_dataset_dir, "test", "image", f"{test_id}.jpg")
+    subprocess.run([
+        "conda", "run", "-n", "cihp_pgn", "python", cihp_pgn_script,
+        "--image", person_img_for_parser,
+        "--output", parse_mask_path
+    ], check=True)
     # Prepare output dir
     outdir = os.path.join(temp_dir, "singlepair_output")
     os.makedirs(outdir, exist_ok=True)

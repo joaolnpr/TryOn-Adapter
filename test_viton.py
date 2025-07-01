@@ -151,20 +151,16 @@ def run_human_parser(input_image_path, output_mask_path):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     shutil.copy2(input_image_path, os.path.join(DATASETS_DIR, "input.jpg"))
 
-    # Build the command to activate the cihp_pgn environment and run the parser
-    command = (
-        "source activate cihp_pgn && "
-        "python test_pgn.py && "
-        "source deactivate"
-    )
+    # Use conda run to execute in the correct environment
+    command = [
+        "conda", "run", "-n", "cihp_pgn", "python", "test_pgn.py"
+    ]
     print("Running CIHP_PGN human parser in cihp_pgn environment...")
     result = subprocess.run(
         command,
         cwd=CIHP_PGN_DIR,
-        shell=True,
         capture_output=True,
-        text=True,
-        executable='/bin/bash'
+        text=True
     )
     print(result.stdout)
     if result.returncode != 0:

@@ -34,6 +34,9 @@ from torchvision.transforms import Resize
 from torch.nn import functional as F
 import subprocess
 import shutil
+import logging
+
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
 def load_checkpoint(model, checkpoint_path):
     if not os.path.exists(checkpoint_path):
@@ -145,41 +148,65 @@ def run_human_parser(input_image_path, output_mask_path):
     DATASETS_DIR = os.path.join(HOME, "datasets")
     OUTPUT_DIR = os.path.join(HOME, "output")
 
+    logging.info(f"Input image path: {input_image_path}")
+    logging.info(f"Output mask path: {output_mask_path}")
+    logging.info(f"CIHP_PGN_DIR: {CIHP_PGN_DIR}")
+    logging.info(f"CHECKPOINT_DIR: {CHECKPOINT_DIR}")
+    logging.info(f"DATASETS_DIR: {DATASETS_DIR}")
+    logging.info(f"OUTPUT_DIR: {OUTPUT_DIR}")
+
     # Prepare input
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
     os.makedirs(DATASETS_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    shutil.copy2(input_image_path, os.path.join(DATASETS_DIR, "input.jpg"))
+    input_copy_path = os.path.join(DATASETS_DIR, "input.jpg")
+    try:
+        shutil.copy2(input_image_path, input_copy_path)
+        logging.info(f"Copied input image to {input_copy_path}")
+    except Exception as e:
+        logging.error(f"Failed to copy input image: {e}")
+        raise
 
     # Use conda run to execute in the correct environment
     command = [
         "conda", "run", "-n", "cihp_pgn", "python", "test_pgn.py"
     ]
-    print("Running CIHP_PGN human parser in cihp_pgn environment...")
+    logging.info(f"Running CIHP_PGN human parser in cihp_pgn environment with command: {' '.join(command)}")
     result = subprocess.run(
         command,
         cwd=CIHP_PGN_DIR,
         capture_output=True,
         text=True
     )
-    print(result.stdout)
+    logging.info(f"STDOUT from parser:\n{result.stdout}")
     if result.returncode != 0:
-        print(result.stderr)
+        logging.error(f"STDERR from parser:\n{result.stderr}")
         raise RuntimeError("CIHP_PGN parser failed!")
 
     # The output mask will be in OUTPUT_DIR, named 'input.png'
     mask_path = os.path.join(OUTPUT_DIR, "input.png")
+    logging.info(f"Looking for mask at {mask_path}")
     if not os.path.exists(mask_path):
+        # List files in OUTPUT_DIR for debugging
+        logging.error(f"Mask not found at {mask_path}. Files in output dir: {os.listdir(OUTPUT_DIR)}")
         raise FileNotFoundError(f"Parser did not create mask: {mask_path}")
 
     # Copy mask to TryOn-Adapter temp dataset
     os.makedirs(os.path.dirname(output_mask_path), exist_ok=True)
-    shutil.copy2(mask_path, output_mask_path)
-    print(f"Mask created and copied to: {output_mask_path}")
+    try:
+        shutil.copy2(mask_path, output_mask_path)
+        logging.info(f"Mask created and copied to: {output_mask_path}")
+    except Exception as e:
+        logging.error(f"Failed to copy mask: {e}")
+        raise
 
     # Clean up (optional)
-    os.remove(os.path.join(DATASETS_DIR, "input.jpg"))
-    os.remove(mask_path)
+    try:
+        os.remove(input_copy_path)
+        os.remove(mask_path)
+        logging.info("Temporary files cleaned up.")
+    except Exception as e:
+        logging.warning(f"Cleanup failed: {e}")
 
 def main():
     parser = argparse.ArgumentParser()
@@ -339,10 +366,19 @@ def main():
     # Generate the segmentation mask if it doesn't exist
     parse_mask_path = os.path.join(opt.dataroot, "test", "image-parse-v3", "test_001.png")
     person_img_path = os.path.join(opt.dataroot, "test", "image", "test_001.jpg")
+    logging.info(f"Person image path: {person_img_path}")
+    logging.info(f"Parse mask path: {parse_mask_path}")
+    if not os.path.exists(person_img_path):
+        logging.error(f"Person image not found at {person_img_path}")
+        raise FileNotFoundError(f"Person image not found: {person_img_path}")
     if not os.path.exists(parse_mask_path):
+        logging.info("Parse mask not found, running human parser...")
         run_human_parser(person_img_path, parse_mask_path)
     if not os.path.exists(parse_mask_path):
+        logging.error(f"Mask was not created: {parse_mask_path}")
         raise FileNotFoundError(f"Mask was not created: {parse_mask_path}")
+    else:
+        logging.info(f"Mask found at {parse_mask_path}")
 
     if torch.cuda.is_available():
         device = torch.device("cuda:{}".format(opt.gpu_id))

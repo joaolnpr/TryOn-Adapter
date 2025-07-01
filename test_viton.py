@@ -235,8 +235,9 @@ def run_single_pair(person_image_path, cloth_image_path, output_path, config_pat
     # Generate human parsing mask using CIHP_PGN
     parse_mask_path = os.path.join(temp_dataset_dir, "test", "image-parse-v3", f"{test_id}.png")
     person_img_for_parser = os.path.join(temp_dataset_dir, "test", "image", f"{test_id}.jpg")
+    script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "human_parse_single.py"))
     subprocess.run([
-        "python", os.path.join("TryOn-Adapter", "human_parse_single.py"),
+        "python", script_path,
         "--image", person_img_for_parser,
         "--output", parse_mask_path
     ], check=True)

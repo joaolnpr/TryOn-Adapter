@@ -625,11 +625,11 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 print("DEBUG: Unconditional conditioning shape:", uc.shape)
                 
                 # Adjust guidance scale for CPU vs GPU
-                guidance_scale = 5.0 if model_device.type == 'cpu' else 7.5
-                print(f"DEBUG: Using guidance scale {guidance_scale} (CPU optimized) to FORCE the model to follow clothing conditioning!")
+                guidance_scale = 6.0 if model_device.type == 'cpu' else 8.0  # Increased for better conditioning
+                print(f"DEBUG: Using guidance scale {guidance_scale} (optimized) to FORCE the model to follow clothing conditioning!")
                 
-                # CRITICAL FIX: Use proper guidance scale instead of 1.0, and more sampling steps
-                samples_ddim, _ = sampler.sample(S=30, conditioning=c_encoded, batch_size=1, shape=shape, down_block_additional_residuals=down_block_additional_residuals, verbose=True, unconditional_guidance_scale=guidance_scale, unconditional_conditioning=uc, eta=0.1, x_T=start_code, use_T_repaint=True, test_model_kwargs=test_model_kwargs, **test_model_kwargs)
+                # IMPROVED: Better sampling parameters for higher quality
+                samples_ddim, _ = sampler.sample(S=40, conditioning=c_encoded, batch_size=1, shape=shape, down_block_additional_residuals=down_block_additional_residuals, verbose=True, unconditional_guidance_scale=guidance_scale, unconditional_conditioning=uc, eta=0.15, x_T=start_code, use_T_repaint=True, test_model_kwargs=test_model_kwargs, **test_model_kwargs)
                 samples_ddim = 1/ 0.18215 * samples_ddim
                 
                 # Clear memory after sampling

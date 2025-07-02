@@ -247,7 +247,7 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
     if torch.cuda.is_available():
         model = model.cuda()
     model.eval()
-    dataset = CPDataset(os.path.dirname(dataset_dir), H, mode='test', unpaired=True)
+    dataset = CPDataset(dataroot, H, mode='test', unpaired=True)
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, pin_memory=True)
     vae_normalize  = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     clip_normalize = transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))

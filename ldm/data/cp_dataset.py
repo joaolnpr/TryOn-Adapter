@@ -117,6 +117,11 @@ class CPDataset(data.Dataset):
         return "CPDataset"
 
     def get_agnostic(self, im, im_parse, pose_data):
+        # Ensure all images are the same size
+        target_size = (self.fine_width, self.fine_height)
+        im = im.resize(target_size, Image.BILINEAR)
+        im_parse = im_parse.resize(target_size, Image.NEAREST)
+        
         parse_array = np.array(im_parse)
         parse_head = ((parse_array == 4).astype(np.float32) +
                       (parse_array == 13).astype(np.float32))
@@ -130,64 +135,114 @@ class CPDataset(data.Dataset):
         agnostic = im.copy()
         agnostic_draw = ImageDraw.Draw(agnostic)
 
-        length_a = np.linalg.norm(pose_data[5] - pose_data[2])
-        length_b = np.linalg.norm(pose_data[12] - pose_data[9])
-        point = (pose_data[9] + pose_data[12]) / 2
-        pose_data[9] = point + (pose_data[9] - point) / length_b * length_a
-        pose_data[12] = point + (pose_data[12] - point) / length_b * length_a
-
-        r = int(length_a / 16) + 1
+        # Ensure pose_data is within bounds
+        pose_data = np.clip(pose_data, 0, max(self.fine_width, self.fine_height))
+        
+        # Calculate length safely
+        if np.linalg.norm(pose_data[5] - pose_data[2]) > 0 and np.linalg.norm(pose_data[12] - pose_data[9]) > 0:
+            length_a = np.linalg.norm(pose_data[5] - pose_data[2])
+            length_b = np.linalg.norm(pose_data[12] - pose_data[9])
+            point = (pose_data[9] + pose_data[12]) / 2
+            pose_data[9] = point + (pose_data[9] - point) / length_b * length_a
+            pose_data[12] = point + (pose_data[12] - point) / length_b * length_a
+            r = int(length_a / 16) + 1
+        else:
+            # Default values if pose data is invalid
+            r = 5
 
         # mask torso
         for i in [9, 12]:
-            pointx, pointy = pose_data[i]
-            agnostic_draw.ellipse((pointx - r * 3, pointy - r * 6, pointx + r * 3, pointy + r * 6), 'gray', 'gray')
-        agnostic_draw.line([tuple(pose_data[i]) for i in [2, 9]], 'gray', width=r * 6)
-        agnostic_draw.line([tuple(pose_data[i]) for i in [5, 12]], 'gray', width=r * 6)
-        agnostic_draw.line([tuple(pose_data[i]) for i in [9, 12]], 'gray', width=r * 12)
-        agnostic_draw.polygon([tuple(pose_data[i]) for i in [2, 5, 12, 9]], 'gray', 'gray')
+            if i < len(pose_data):
+                pointx, pointy = pose_data[i]
+                pointx, pointy = int(pointx), int(pointy)
+                if 0 <= pointx < self.fine_width and 0 <= pointy < self.fine_height:
+                    agnostic_draw.ellipse((pointx - r * 3, pointy - r * 6, pointx + r * 3, pointy + r * 6), 'gray', 'gray')
+        
+        # Draw lines safely
+        for line_points in [[2, 9], [5, 12], [9, 12]]:
+            if all(i < len(pose_data) for i in line_points):
+                points = [(int(pose_data[i][0]), int(pose_data[i][1])) for i in line_points]
+                if all(0 <= p[0] < self.fine_width and 0 <= p[1] < self.fine_height for p in points):
+                    agnostic_draw.line(points, 'gray', width=r * 6)
+        
+        # Draw polygon safely
+        polygon_points = [2, 5, 12, 9]
+        if all(i < len(pose_data) for i in polygon_points):
+            points = [(int(pose_data[i][0]), int(pose_data[i][1])) for i in polygon_points]
+            if all(0 <= p[0] < self.fine_width and 0 <= p[1] < self.fine_height for p in points):
+                agnostic_draw.polygon(points, 'gray', 'gray')
 
         # mask neck
-        pointx, pointy = pose_data[1]
-        agnostic_draw.rectangle((pointx - r * 5, pointy - r * 9, pointx + r * 5, pointy), 'gray', 'gray')
+        if 1 < len(pose_data):
+            pointx, pointy = pose_data[1]
+            pointx, pointy = int(pointx), int(pointy)
+            if 0 <= pointx < self.fine_width and 0 <= pointy < self.fine_height:
+                agnostic_draw.rectangle((pointx - r * 5, pointy - r * 9, pointx + r * 5, pointy), 'gray', 'gray')
 
         # mask arms
-        agnostic_draw.line([tuple(pose_data[i]) for i in [2, 5]], 'gray', width=r * 12)
+        if all(i < len(pose_data) for i in [2, 5]):
+            points = [(int(pose_data[i][0]), int(pose_data[i][1])) for i in [2, 5]]
+            if all(0 <= p[0] < self.fine_width and 0 <= p[1] < self.fine_height for p in points):
+                agnostic_draw.line(points, 'gray', width=r * 12)
+        
         for i in [2, 5]:
-            pointx, pointy = pose_data[i]
-            agnostic_draw.ellipse((pointx - r * 5, pointy - r * 6, pointx + r * 5, pointy + r * 6), 'gray', 'gray')
+            if i < len(pose_data):
+                pointx, pointy = pose_data[i]
+                pointx, pointy = int(pointx), int(pointy)
+                if 0 <= pointx < self.fine_width and 0 <= pointy < self.fine_height:
+                    agnostic_draw.ellipse((pointx - r * 5, pointy - r * 6, pointx + r * 5, pointy + r * 6), 'gray', 'gray')
+        
         for i in [3, 4, 6, 7]:
-            if (pose_data[i - 1, 0] == 0.0 and pose_data[i - 1, 1] == 0.0) or (
-                    pose_data[i, 0] == 0.0 and pose_data[i, 1] == 0.0):
-                continue
-            agnostic_draw.line([tuple(pose_data[j]) for j in [i - 1, i]], 'gray', width=r * 10)
-            pointx, pointy = pose_data[i]
-            agnostic_draw.ellipse((pointx - r * 5, pointy - r * 5, pointx + r * 5, pointy + r * 5), 'gray', 'gray')
-
-        for parse_id, pose_ids in [(14, [5, 6, 7]), (15, [2, 3, 4])]:
-            # Create mask_arm with the same size as the parse image
-            mask_arm = Image.new('L', (self.fine_width, self.fine_height), 'white')
-            mask_arm_draw = ImageDraw.Draw(mask_arm)
-            pointx, pointy = pose_data[pose_ids[0]]
-            mask_arm_draw.ellipse((pointx - r * 5, pointy - r * 6, pointx + r * 5, pointy + r * 6), 'black', 'black')
-            for i in pose_ids[1:]:
+            if i < len(pose_data) and i-1 < len(pose_data):
                 if (pose_data[i - 1, 0] == 0.0 and pose_data[i - 1, 1] == 0.0) or (
                         pose_data[i, 0] == 0.0 and pose_data[i, 1] == 0.0):
                     continue
-                mask_arm_draw.line([tuple(pose_data[j]) for j in [i - 1, i]], 'black', width=r * 10)
-                pointx, pointy = pose_data[i]
-                if i != pose_ids[-1]:
-                    mask_arm_draw.ellipse((pointx - r * 5, pointy - r * 5, pointx + r * 5, pointy + r * 5), 'black',
-                                          'black')
-            mask_arm_draw.ellipse((pointx - r * 4, pointy - r * 4, pointx + r * 4, pointy + r * 4), 'black', 'black')
+                points = [(int(pose_data[j][0]), int(pose_data[j][1])) for j in [i - 1, i]]
+                if all(0 <= p[0] < self.fine_width and 0 <= p[1] < self.fine_height for p in points):
+                    agnostic_draw.line(points, 'gray', width=r * 10)
+                    pointx, pointy = pose_data[i]
+                    pointx, pointy = int(pointx), int(pointy)
+                    if 0 <= pointx < self.fine_width and 0 <= pointy < self.fine_height:
+                        agnostic_draw.ellipse((pointx - r * 5, pointy - r * 5, pointx + r * 5, pointy + r * 5), 'gray', 'gray')
 
-            # Resize parse_array to match mask_arm dimensions
-            parse_array_resized = np.array(im_parse.resize((self.fine_width, self.fine_height), Image.NEAREST))
-            parse_arm = (np.array(mask_arm) / 255) * (parse_array_resized == parse_id).astype(np.float32)
-            agnostic.paste(im, None, Image.fromarray(np.uint8(parse_arm * 255), 'L'))
+        for parse_id, pose_ids in [(14, [5, 6, 7]), (15, [2, 3, 4])]:
+            # Create mask_arm with the same size as the target
+            mask_arm = Image.new('L', target_size, 'white')
+            mask_arm_draw = ImageDraw.Draw(mask_arm)
+            
+            if pose_ids[0] < len(pose_data):
+                pointx, pointy = pose_data[pose_ids[0]]
+                pointx, pointy = int(pointx), int(pointy)
+                if 0 <= pointx < self.fine_width and 0 <= pointy < self.fine_height:
+                    mask_arm_draw.ellipse((pointx - r * 5, pointy - r * 6, pointx + r * 5, pointy + r * 6), 'black', 'black')
+            
+            for i in pose_ids[1:]:
+                if i < len(pose_data) and i-1 < len(pose_data):
+                    if (pose_data[i - 1, 0] == 0.0 and pose_data[i - 1, 1] == 0.0) or (
+                            pose_data[i, 0] == 0.0 and pose_data[i, 1] == 0.0):
+                        continue
+                    points = [(int(pose_data[j][0]), int(pose_data[j][1])) for j in [i - 1, i]]
+                    if all(0 <= p[0] < self.fine_width and 0 <= p[1] < self.fine_height for p in points):
+                        mask_arm_draw.line(points, 'black', width=r * 10)
+                        pointx, pointy = pose_data[i]
+                        pointx, pointy = int(pointx), int(pointy)
+                        if 0 <= pointx < self.fine_width and 0 <= pointy < self.fine_height:
+                            if i != pose_ids[-1]:
+                                mask_arm_draw.ellipse((pointx - r * 5, pointy - r * 5, pointx + r * 5, pointy + r * 5), 'black', 'black')
+                            else:
+                                mask_arm_draw.ellipse((pointx - r * 4, pointy - r * 4, pointx + r * 4, pointy + r * 4), 'black', 'black')
 
-        agnostic.paste(im, None, Image.fromarray(np.uint8(parse_head * 255), 'L'))
-        agnostic.paste(im, None, Image.fromarray(np.uint8(parse_lower * 255), 'L'))
+            # Use the already resized parse_array
+            parse_arm = (np.array(mask_arm) / 255) * (parse_array == parse_id).astype(np.float32)
+            parse_arm_img = Image.fromarray(np.uint8(parse_arm * 255), 'L')
+            agnostic.paste(im, None, parse_arm_img)
+
+        # Paste head and lower body
+        head_mask = Image.fromarray(np.uint8(parse_head * 255), 'L')
+        lower_mask = Image.fromarray(np.uint8(parse_lower * 255), 'L')
+        agnostic.paste(im, None, head_mask)
+        agnostic.paste(im, None, lower_mask)
+        
         return agnostic
 
     

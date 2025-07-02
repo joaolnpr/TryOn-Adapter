@@ -274,9 +274,9 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             feat_tensor = feat_tensor.cuda() if torch.cuda.is_available() else feat_tensor
             ref_tensor = ref_tensor.cuda() if torch.cuda.is_available() else ref_tensor
             uc = None
-            c_vae = model.encode_first_stage(vae_normalize(ref_tensor.to(torch.float16)))
+            c_vae = model.encode_first_stage(vae_normalize(ref_tensor))
             c_vae = model.get_first_stage_encoding(c_vae).detach()
-            c, patches = model.get_learned_conditioning(clip_normalize(ref_tensor.to(torch.float16)))
+            c, patches = model.get_learned_conditioning(clip_normalize(ref_tensor))
             patches = model.fuse_adapter(patches,c_vae)
             c = model.proj_out(c)
             patches = model.proj_out_patches(patches)

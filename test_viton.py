@@ -341,7 +341,8 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                         raise ValueError(f"Cannot match channel count: mask {m.shape}, sobel {s.shape}")
                 down_block_additional_residuals.append(torch.cat([m.unsqueeze(0), s.unsqueeze(0)], dim=0))
             # Resize inpaint_image and mask_tensor to match latent shape
-            latent_shape = feat_tensor.shape[-2:]
+            shape = [4, H // 8, W // 8]
+            latent_shape = shape[1:]  # (H, W) for the latent space
             inpaint_image_resized = F.interpolate(inpaint_image, size=latent_shape, mode='bilinear', align_corners=False)
             inpaint_mask_resized = F.interpolate(mask_tensor, size=latent_shape, mode='nearest')
             test_model_kwargs['inpaint_mask'] = inpaint_mask_resized

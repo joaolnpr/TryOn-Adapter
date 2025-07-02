@@ -340,24 +340,23 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                     else:
                         raise ValueError(f"Cannot match channel count: mask {m.shape}, sobel {s.shape}")
                 down_block_additional_residuals.append(torch.cat([m.unsqueeze(0), s.unsqueeze(0)], dim=0))
-            z_inpaint = model.encode_first_stage(test_model_kwargs['inpaint_image'])
-            z_inpaint = model.get_first_stage_encoding(z_inpaint).detach()
-            test_model_kwargs['inpaint_image'] = z_inpaint
-            test_model_kwargs['inpaint_mask'] = resize(test_model_kwargs['inpaint_mask'])
-            warp_feat = model.encode_first_stage(feat_tensor)
-            warp_feat = model.get_first_stage_encoding(warp_feat).detach()
-            
             # Set required keys in test_model_kwargs
             test_model_kwargs['inpaint_mask'] = mask_tensor
             test_model_kwargs['inpaint_image'] = inpaint_image
             test_model_kwargs['warp_feat'] = feat_tensor
             test_model_kwargs['new_mask'] = new_mask
-            
             # Check that all required keys are present in test_model_kwargs before use
             required_keys = ['inpaint_image', 'inpaint_mask', 'warp_feat', 'new_mask']
             for k in required_keys:
                 if k not in test_model_kwargs:
                     raise KeyError(f"Missing key '{k}' in test_model_kwargs. Current keys: {list(test_model_kwargs.keys())}")
+            # Use a separate variable for the encoded version
+            z_inpaint = model.encode_first_stage(inpaint_image)
+            z_inpaint = model.get_first_stage_encoding(z_inpaint).detach()
+            # If you need to use z_inpaint downstream, pass it directly as a variable, not by overwriting the dictionary key
+            test_model_kwargs['inpaint_mask'] = resize(test_model_kwargs['inpaint_mask'])
+            warp_feat = model.encode_first_stage(feat_tensor)
+            warp_feat = model.get_first_stage_encoding(warp_feat).detach()
             
             # Clear memory after encoding operations
             del mask_tensor, inpaint_image, ref_tensor, feat_tensor, image_tensor, pose, sobel_img, parse_agnostic, warp_mask, new_mask, cm, c_vae, patches

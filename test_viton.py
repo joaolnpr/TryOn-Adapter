@@ -368,22 +368,11 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             # Clear memory before encoding
             clear_gpu_memory()
             
-            # Convert mask to 3 channels before encoding (VAE expects 3-channel input)
-            mask_tensor_3ch = convert_mask_to_3channel(mask_tensor)
-            
-            # Encode inpaint_image and mask_tensor to latent space
+            # Encode inpaint_image to latent space
             z_inpaint = model.encode_first_stage(inpaint_image)
             z_inpaint = model.get_first_stage_encoding(z_inpaint).detach()
             
             clear_gpu_memory()  # Clear memory after encoding inpaint_image
-            
-            z_mask = model.encode_first_stage(mask_tensor_3ch)
-            z_mask = model.get_first_stage_encoding(z_mask).detach()
-            
-            clear_gpu_memory()  # Clear memory after encoding mask
-            
-            # Clean up temporary tensor
-            del mask_tensor_3ch
             
             # Encode feat_tensor to get the proper latent dimensions
             warp_feat_encoded = model.encode_first_stage(feat_tensor)
@@ -392,11 +381,14 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             # Use the encoded warp_feat shape for proper latent space dimensions
             latent_spatial_shape = warp_feat_encoded.shape[-2:]
             z_inpaint_resized = F.interpolate(z_inpaint, size=latent_spatial_shape, mode='bilinear', align_corners=False)
-            z_mask_resized = F.interpolate(z_mask, size=latent_spatial_shape, mode='nearest')
+            
+            # For the UNet input, keep mask as single channel and resize to latent space
+            mask_single_channel = mask_tensor if mask_tensor.shape[1] == 1 else mask_tensor[:, :1, :, :]  # Ensure single channel
+            mask_latent_resized = F.interpolate(mask_single_channel, size=latent_spatial_shape, mode='nearest')
             
             # Set up the properly sized latent tensors for diffusion
-            test_model_kwargs['inpaint_mask'] = z_mask_resized
-            test_model_kwargs['inpaint_image'] = z_inpaint_resized
+            test_model_kwargs['inpaint_mask'] = mask_latent_resized  # Single channel for UNet
+            test_model_kwargs['inpaint_image'] = z_inpaint_resized   # 4 channels (latent)
             test_model_kwargs['warp_feat'] = feat_tensor
             test_model_kwargs['new_mask'] = new_mask
             test_model_kwargs['x_inpaint'] = z_inpaint
@@ -410,6 +402,7 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             print(f"DEBUG: Final tensor shapes for diffusion:")
             print(f"  inpaint_image: {test_model_kwargs['inpaint_image'].shape}")
             print(f"  inpaint_mask: {test_model_kwargs['inpaint_mask'].shape}")
+            print(f"  Expected total channels for UNet: 4 + 4 + 1 = 9")
             
             # Clear memory after encoding operations
             del feat_tensor  # Now we can delete this as we have the encoded version
@@ -423,8 +416,9 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             # Debug print shapes before sampling
             print("DEBUG: start_code shape:", start_code.shape)
             print("DEBUG: z_inpaint_resized shape:", test_model_kwargs['inpaint_image'].shape)
-            print("DEBUG: z_mask_resized shape:", test_model_kwargs['inpaint_mask'].shape)
+            print("DEBUG: mask_latent_resized shape:", test_model_kwargs['inpaint_mask'].shape)
             print("DEBUG: warp_feat_encoded shape:", warp_feat_encoded.shape)
+            print("DEBUG: Total input channels will be:", start_code.shape[1] + test_model_kwargs['inpaint_image'].shape[1] + test_model_kwargs['inpaint_mask'].shape[1])
             samples_ddim, _ = sampler.sample(S=100, conditioning=c, batch_size=1, shape=shape, down_block_additional_residuals=down_block_additional_residuals, verbose=False, unconditional_guidance_scale=1, unconditional_conditioning=uc, eta=0.0, x_T=start_code, use_T_repaint=True, test_model_kwargs=test_model_kwargs, **test_model_kwargs)
             samples_ddim = 1/ 0.18215 * samples_ddim
             

@@ -37,10 +37,10 @@ import shutil
 import logging
 
 # Memory management settings
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:32"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
 torch.cuda.empty_cache()
 if torch.cuda.is_available():
-    torch.cuda.set_per_process_memory_fraction(0.8, 0)
+    torch.cuda.set_per_process_memory_fraction(0.7, 0)
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
@@ -49,6 +49,17 @@ def load_checkpoint(model, checkpoint_path):
         raise ValueError("'{}' is not a valid checkpoint path".format(checkpoint_path))
     model.load_state_dict(torch.load(checkpoint_path))
 
+def clear_gpu_memory():
+    """Helper function to clear GPU memory"""
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+def convert_mask_to_3channel(mask_tensor):
+    """Convert single-channel mask to 3-channel by repeating"""
+    if mask_tensor.shape[1] == 1:  # If single channel
+        mask_tensor = mask_tensor.repeat(1, 3, 1, 1)  # Repeat to make 3 channels
+    return mask_tensor
 
 def chunk(it, size):
     it = iter(it)
@@ -102,11 +113,17 @@ def load_model_from_config(config, ckpt, verbose=False):
 
     try:
         if torch.cuda.is_available():
+            # Clear memory before loading to GPU
+            clear_gpu_memory()
             model = model.cuda()
-            if hasattr(model, 'diffusion_model'):
-                model.diffusion_model = model.diffusion_model.half()
-            if hasattr(model, 'first_stage_model'):
-                model.first_stage_model = model.first_stage_model.half()
+            # Use mixed precision more carefully
+            try:
+                if hasattr(model, 'diffusion_model'):
+                    model.diffusion_model = model.diffusion_model.half()
+                if hasattr(model, 'first_stage_model'):
+                    model.first_stage_model = model.first_stage_model.half()
+            except RuntimeError as e:
+                print(f"Half precision failed: {e}, keeping float32")
     except RuntimeError as e:
         print(f"CUDA OOM: {e}\nFalling back to CPU.")
         model = model.cpu()
@@ -242,6 +259,10 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
     # Run the pipeline (reuse main logic, but for this dataset)
     config = OmegaConf.load(f"{config_path}")
     model = load_model_from_config(config, f"{ckpt_path}")
+    
+    # Clear memory after model loading
+    clear_gpu_memory()
+    
     dataset = CPDataset(dataroot, H, mode='test', unpaired=True)
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, pin_memory=False)
     vae_normalize  = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
@@ -256,11 +277,12 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
     out_feature_channels = [128, 256, 512, 512, 512]
     int_layers = [1, 2, 3, 4, 5]
     emasc = EMASC(in_feature_channels, out_feature_channels, kernel_size=3, padding=1, stride=1, type='nonlinear')
-    emasac_sd = torch.load(os.path.join(ckpt_elbm_path,'emasc_40000.pth'))
+    emasac_sd = torch.load(os.path.join(ckpt_elbm_path,'emasc_40000.pth'), map_location='cpu')
     emasc.load_state_dict(emasac_sd)
+    del emasac_sd  # Free memory
     if torch.cuda.is_available():
         emasc.cuda()
-        torch.cuda.empty_cache()  # Clear memory after EMASC loading
+        clear_gpu_memory()  # Clear memory after EMASC loading
     emasc.eval()
     sampler = DDIMSampler(model)
     gauss = tgm.image.GaussianBlur((15, 15), (3, 3))
@@ -353,15 +375,34 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             for k in required_keys:
                 if k not in test_model_kwargs:
                     raise KeyError(f"Missing key '{k}' in test_model_kwargs. Current keys: {list(test_model_kwargs.keys())}")
+            # Clear memory before encoding
+            clear_gpu_memory()
+            
+            # Convert mask to 3 channels before encoding (VAE expects 3-channel input)
+            mask_tensor_3ch = convert_mask_to_3channel(mask_tensor)
+            
             # Encode inpaint_image and mask_tensor to latent space
             z_inpaint = model.encode_first_stage(inpaint_image)
             z_inpaint = model.get_first_stage_encoding(z_inpaint).detach()
-            z_mask = model.encode_first_stage(mask_tensor)
+            
+            clear_gpu_memory()  # Clear memory after encoding inpaint_image
+            
+            z_mask = model.encode_first_stage(mask_tensor_3ch)
             z_mask = model.get_first_stage_encoding(z_mask).detach()
-            # Resize latents to match warp_feat shape
-            latent_shape = warp_feat.shape[-2:]
+            
+            clear_gpu_memory()  # Clear memory after encoding mask
+            
+            # Clean up temporary tensor
+            del mask_tensor_3ch
+            
+            # Get latent shape for resizing (using already computed latent_shape)
             z_inpaint_resized = F.interpolate(z_inpaint, size=latent_shape, mode='bilinear', align_corners=False)
             z_mask_resized = F.interpolate(z_mask, size=latent_shape, mode='nearest')
+            
+            # Encode feat_tensor before cleanup
+            warp_feat_encoded = model.encode_first_stage(feat_tensor)
+            warp_feat_encoded = model.get_first_stage_encoding(warp_feat_encoded).detach()
+            
             test_model_kwargs['inpaint_mask'] = z_mask_resized
             test_model_kwargs['inpaint_image'] = z_inpaint_resized
             test_model_kwargs['warp_feat'] = feat_tensor
@@ -375,18 +416,15 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             test_model_kwargs['x_inpaint'] = z_inpaint
             # If you need to use z_inpaint downstream, pass it directly as a variable, not by overwriting the dictionary key
             test_model_kwargs['inpaint_mask'] = resize(test_model_kwargs['inpaint_mask'])
-            warp_feat = model.encode_first_stage(feat_tensor)
-            warp_feat = model.get_first_stage_encoding(warp_feat).detach()
             
             # Clear memory after encoding operations
-            del mask_tensor, inpaint_image, ref_tensor, feat_tensor, image_tensor, pose, sobel_img, parse_agnostic, warp_mask, new_mask, cm
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            del feat_tensor  # Now we can delete this as we have the encoded version
+            clear_gpu_memory()
             model_device = next(model.parameters()).device
-            warp_feat = warp_feat.to(model_device)
+            warp_feat_encoded = warp_feat_encoded.to(model_device)
             ts = torch.full((1,), 999, device=device, dtype=torch.long).to(model_device)
             uc = None
-            start_code = model.q_sample(warp_feat, ts)
+            start_code = model.q_sample(warp_feat_encoded, ts)
             shape = [4, H // 8, W // 8]
             # Debug print shapes before sampling
             print("DEBUG: start_code shape:", start_code.shape)
@@ -396,10 +434,12 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             samples_ddim = 1/ 0.18215 * samples_ddim
             
             # Clear memory after sampling
-            del start_code, down_block_additional_residuals, warp_feat, c
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            _, intermediate_features = model.vae.encode(data["im_mask"].cuda() if torch.cuda.is_available() else data["im_mask"])
+            del start_code, down_block_additional_residuals, warp_feat_encoded, c
+            clear_gpu_memory()
+            # Convert im_mask to 3 channels before encoding
+            im_mask_3ch = convert_mask_to_3channel(data["im_mask"])
+            _, intermediate_features = model.vae.encode(im_mask_3ch.cuda() if torch.cuda.is_available() else im_mask_3ch)
+            del im_mask_3ch  # Clean up
             intermediate_features = [intermediate_features[i] for i in int_layers]
             processed_intermediate_features = emasc(intermediate_features)
             processed_intermediate_features = mask_features(processed_intermediate_features,(1- data["inpaint_mask"]).cuda() if torch.cuda.is_available() else (1- data["inpaint_mask"]))
@@ -416,13 +456,16 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 img.save(output_path)
     
     # Final memory cleanup
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    clear_gpu_memory()
 
 def main():
-    # Clear GPU memory at start
+    # Clear GPU memory at start and set up memory management
+    clear_gpu_memory()
+    
+    # Set additional memory management for stability
     if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--person_image', type=str, required=True)

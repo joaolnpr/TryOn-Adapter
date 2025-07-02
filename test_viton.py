@@ -487,7 +487,7 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             print("DEBUG: warp_feat_encoded shape:", warp_feat_encoded.shape)
             print("DEBUG: Total input channels will be:", start_code.shape[1] + test_model_kwargs['inpaint_image'].shape[1] + test_model_kwargs['inpaint_mask'].shape[1])
             print("DEBUG: Cloth conditioning shape:", c_encoded.shape)
-            samples_ddim, _ = sampler.sample(S=100, conditioning=c_encoded, batch_size=1, shape=shape, down_block_additional_residuals=down_block_additional_residuals, verbose=False, unconditional_guidance_scale=1, unconditional_conditioning=uc, eta=0.0, x_T=start_code, use_T_repaint=True, test_model_kwargs=test_model_kwargs, **test_model_kwargs)
+            samples_ddim, _ = sampler.sample(S=20, conditioning=c_encoded, batch_size=1, shape=shape, down_block_additional_residuals=down_block_additional_residuals, verbose=False, unconditional_guidance_scale=1, unconditional_conditioning=uc, eta=0.0, x_T=start_code, use_T_repaint=True, test_model_kwargs=test_model_kwargs, **test_model_kwargs)
             samples_ddim = 1/ 0.18215 * samples_ddim
             
             # Clear memory after sampling

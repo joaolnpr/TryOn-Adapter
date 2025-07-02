@@ -300,20 +300,22 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 ref_tensor_half = ref_tensor.half().cuda()
             else:
                 ref_tensor_half = ref_tensor
+            # For CLIP/conditioning, always use float32 and correct device
+            ref_tensor_clip = ref_tensor.float().cuda() if torch.cuda.is_available() else ref_tensor.float()
             test_model_kwargs['inpaint_mask'] = mask_tensor
             test_model_kwargs['inpaint_image'] = inpaint_image
             test_model_kwargs['warp_feat'] = feat_tensor
             test_model_kwargs['new_mask'] = new_mask
             feat_tensor = feat_tensor
-            ref_tensor = ref_tensor.cuda() if torch.cuda.is_available() else ref_tensor
+            # Do NOT move ref_tensor to CUDA here, only use ref_tensor_half and ref_tensor_clip as needed
             uc = None
             # Print memory summary before encoding
             if torch.cuda.is_available():
                 print(torch.cuda.memory_summary())
-            # Use ref_tensor_half for VAE/UNet, ref_tensor (float32) for CLIP/conditioning
+            # Use ref_tensor_half for VAE/UNet, ref_tensor_clip (float32) for CLIP/conditioning
             c_vae = model.encode_first_stage(vae_normalize(ref_tensor_half))
             c_vae = model.get_first_stage_encoding(c_vae).detach()
-            c, patches = model.get_learned_conditioning(clip_normalize(ref_tensor))
+            c, patches = model.get_learned_conditioning(clip_normalize(ref_tensor_clip))
             patches = model.fuse_adapter(patches,c_vae)
             c = model.proj_out(c)
             patches = model.proj_out_patches(patches)

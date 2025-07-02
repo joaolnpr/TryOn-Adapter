@@ -491,19 +491,27 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 # For the UNet input, keep mask as single channel and resize to latent space
                 mask_single_channel = mask_tensor if mask_tensor.shape[1] == 1 else mask_tensor[:, :1, :, :]  # Ensure single channel
                 
-                # CRITICAL: Ensure the mask is properly inverted (1 = areas to inpaint/replace, 0 = areas to keep)
+                # CRITICAL: Fix the mask - it should be inverted! 
+                # Current mask: 1 = keep, 0 = replace  
+                # UNet needs: 0 = keep, 1 = replace
                 print(f"DEBUG: Original mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
                 
-                # Make sure we have a clear inpainting mask for the torso area
-                if mask_single_channel.mean() < 0.1:  # If mask is mostly zeros, create a torso mask
-                    print("DEBUG: Creating enhanced torso inpainting mask...")
+                # INVERT the mask since CPDataset gives us the opposite of what UNet expects
+                if mask_single_channel.mean() > 0.5:  # If mask is mostly 1s, invert it
+                    print("DEBUG: Inverting mask - CPDataset mask was backwards!")
+                    mask_single_channel = 1.0 - mask_single_channel
+                    print(f"DEBUG: Inverted mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
+                
+                # Now ensure we have a reasonable torso inpainting area
+                if mask_single_channel.mean() < 0.05:  # If mask has very little inpainting area
+                    print("DEBUG: Creating focused torso inpainting mask...")
                     B, C, H, W = mask_single_channel.shape
                     enhanced_mask = torch.zeros_like(mask_single_channel)
-                    # Create torso region mask (where clothing should be applied)
-                    torso_top = int(0.2 * H)
-                    torso_bottom = int(0.7 * H) 
-                    torso_left = int(0.25 * W)
-                    torso_right = int(0.75 * W)
+                    # Create smaller, focused torso region mask (where clothing should be applied)
+                    torso_top = int(0.25 * H)      # Start lower 
+                    torso_bottom = int(0.65 * H)   # End higher
+                    torso_left = int(0.3 * W)      # More narrow
+                    torso_right = int(0.7 * W)     # More narrow
                     enhanced_mask[:, :, torso_top:torso_bottom, torso_left:torso_right] = 1.0
                     mask_single_channel = enhanced_mask
                     print(f"DEBUG: Enhanced mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
@@ -570,10 +578,13 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 print("DEBUG: Total input channels will be:", start_code.shape[1] + test_model_kwargs['inpaint_image'].shape[1] + test_model_kwargs['inpaint_mask'].shape[1])
                 print("DEBUG: Cloth conditioning shape:", c_encoded.shape)
                 print("DEBUG: Unconditional conditioning shape:", uc.shape)
-                print("DEBUG: Using guidance scale 7.5 to FORCE the model to follow clothing conditioning!")
-                
-                # CRITICAL FIX: Use proper guidance scale (7.5) instead of 1.0, and more sampling steps
-                samples_ddim, _ = sampler.sample(S=30, conditioning=c_encoded, batch_size=1, shape=shape, down_block_additional_residuals=down_block_additional_residuals, verbose=True, unconditional_guidance_scale=7.5, unconditional_conditioning=uc, eta=0.1, x_T=start_code, use_T_repaint=True, test_model_kwargs=test_model_kwargs, **test_model_kwargs)
+            
+            # Adjust guidance scale for CPU vs GPU
+            guidance_scale = 5.0 if model_device.type == 'cpu' else 7.5
+            print(f"DEBUG: Using guidance scale {guidance_scale} (CPU optimized) to FORCE the model to follow clothing conditioning!")
+            
+            # CRITICAL FIX: Use proper guidance scale instead of 1.0, and more sampling steps
+            samples_ddim, _ = sampler.sample(S=30, conditioning=c_encoded, batch_size=1, shape=shape, down_block_additional_residuals=down_block_additional_residuals, verbose=True, unconditional_guidance_scale=guidance_scale, unconditional_conditioning=uc, eta=0.1, x_T=start_code, use_T_repaint=True, test_model_kwargs=test_model_kwargs, **test_model_kwargs)
                 samples_ddim = 1/ 0.18215 * samples_ddim
                 
                 # Clear memory after sampling

@@ -322,6 +322,12 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             c = to_model_dtype(c)
             image_tensor = to_model_dtype(image_tensor)
             pose = to_model_dtype(pose)
+            
+            # Process cloth conditioning to proper format
+            # The cloth needs to be encoded to latent space for proper conditioning
+            c_encoded = model.encode_first_stage(c)
+            c_encoded = model.get_first_stage_encoding(c_encoded).detach()
+            c_encoded = to_model_dtype(c_encoded)
             # Prepare ref_tensor_half for VAE/UNet
             if next(model.parameters()).is_cuda:
                 ref_tensor_half = ref_tensor.half().cuda()
@@ -419,11 +425,12 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             print("DEBUG: mask_latent_resized shape:", test_model_kwargs['inpaint_mask'].shape)
             print("DEBUG: warp_feat_encoded shape:", warp_feat_encoded.shape)
             print("DEBUG: Total input channels will be:", start_code.shape[1] + test_model_kwargs['inpaint_image'].shape[1] + test_model_kwargs['inpaint_mask'].shape[1])
-            samples_ddim, _ = sampler.sample(S=100, conditioning=c, batch_size=1, shape=shape, down_block_additional_residuals=down_block_additional_residuals, verbose=False, unconditional_guidance_scale=1, unconditional_conditioning=uc, eta=0.0, x_T=start_code, use_T_repaint=True, test_model_kwargs=test_model_kwargs, **test_model_kwargs)
+            print("DEBUG: Cloth conditioning shape:", c_encoded.shape)
+            samples_ddim, _ = sampler.sample(S=100, conditioning=c_encoded, batch_size=1, shape=shape, down_block_additional_residuals=down_block_additional_residuals, verbose=False, unconditional_guidance_scale=1, unconditional_conditioning=uc, eta=0.0, x_T=start_code, use_T_repaint=True, test_model_kwargs=test_model_kwargs, **test_model_kwargs)
             samples_ddim = 1/ 0.18215 * samples_ddim
             
             # Clear memory after sampling
-            del start_code, down_block_additional_residuals, warp_feat_encoded, c
+            del start_code, down_block_additional_residuals, warp_feat_encoded, c, c_encoded
             clear_gpu_memory()
             # Convert im_mask to 3 channels before encoding
             im_mask_3ch = convert_mask_to_3channel(data["im_mask"])

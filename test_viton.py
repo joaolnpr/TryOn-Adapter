@@ -342,7 +342,10 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 c_vae = model.get_first_stage_encoding(c_vae).detach()
                 clear_gpu_memory()  # Clear after VAE encoding
                 
-                c_clip, patches = model.get_learned_conditioning(clip_normalize(c))
+                # Resize cloth to 224x224 for CLIP processing (CLIP expects this size)
+                c_resized = F.interpolate(c, size=(224, 224), mode='bilinear', align_corners=False)
+                c_clip, patches = model.get_learned_conditioning(clip_normalize(c_resized))
+                del c_resized  # Clean up resized tensor
                 clear_gpu_memory()  # Clear after CLIP processing
                 
                 # Fuse the features (this might need the fuse_adapter method)

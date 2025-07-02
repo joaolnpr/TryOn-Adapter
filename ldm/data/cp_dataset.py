@@ -309,12 +309,18 @@ class CPDataset(data.Dataset):
             seg_predicts = parse_onehot
         
         sobel_img_or =  cv2.imread(osp.join(self.data_path, warped_cloth_name), cv2.IMREAD_GRAYSCALE)
+        if sobel_img_or is None:
+            # Create placeholder sobel image if warped cloth doesn't exist
+            sobel_img_or = np.zeros((512, 384), dtype=np.uint8)
         sobel_img_or = cv2.resize(sobel_img_or,(384,512))
         sobelx = cv2.Sobel(sobel_img_or, cv2.CV_64F, 1, 0, ksize=3)
         sobely = cv2.Sobel(sobel_img_or, cv2.CV_64F, 0, 1, ksize=3)
         kernel = np.ones((3, 3), np.uint8)
         
         youhua_mask = cv2.imread(osp.join(self.data_path, warped_cloth_mask_name), cv2.IMREAD_GRAYSCALE)
+        if youhua_mask is None:
+            # Create placeholder mask if warped cloth mask doesn't exist
+            youhua_mask = np.zeros((512, 384), dtype=np.uint8)
         eroded_mask = cv2.erode(youhua_mask, kernel, iterations=5)
         gradient = cv2.addWeighted(cv2.convertScaleAbs(sobelx), 0.5, cv2.convertScaleAbs(sobely), 0.5, 0)
         gradient[eroded_mask == 0] = 0

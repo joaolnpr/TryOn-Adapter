@@ -284,13 +284,14 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             down_block_additional_residuals = list()
             # Fix channel mismatch for adapters
             # adapter_mask expects 192 channels (3*64), adapter_canny expects 64 channels
-            # The adapters use pixel unshuffle, so we need to create the right input format
+            # The adapters use pixel unshuffle(8) which multiplies channels by 64
+            # So we need: 192/64 = 3 channels for mask, 64/64 = 1 channel for sobel
             
-            # For parse_agnostic: convert 1 channel to 192 channels (3*64)
-            parse_agnostic_input = parse_agnostic.repeat(1, 192, 1, 1)  # Repeat to 192 channels
+            # For parse_agnostic: convert 1 channel to 3 channels (192/64)
+            parse_agnostic_input = parse_agnostic.repeat(1, 3, 1, 1)  # 1 -> 3 channels
             
-            # For sobel_img: convert 1 channel to 64 channels  
-            sobel_img_input = sobel_img.repeat(1, 64, 1, 1)  # Repeat to 64 channels
+            # For sobel_img: keep 1 channel (64/64)  
+            sobel_img_input = sobel_img  # Already 1 channel
             
             mask_resduial = model.adapter_mask(parse_agnostic_input.cuda() if torch.cuda.is_available() else parse_agnostic_input)
             sobel_resduial = model.adapter_canny(sobel_img_input.cuda() if torch.cuda.is_available() else sobel_img_input)

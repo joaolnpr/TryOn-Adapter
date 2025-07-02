@@ -321,11 +321,24 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             for i in range(min(len(mask_resduial), len(sobel_resduial))):
                 m = mask_resduial[i]
                 s = sobel_resduial[i]
-                # Ensure m and s are 3D (C, H, W)
+                # Ensure both are 3D (C, H, W)
                 if m.dim() > 3:
                     m = m.squeeze(0)
                 if s.dim() > 3:
                     s = s.squeeze(0)
+                # If spatial shapes don't match, resize s to match m
+                if m.shape[-2:] != s.shape[-2:]:
+                    s_ = s.unsqueeze(0) if s.dim() == 3 else s
+                    s_resized = F.interpolate(s_, size=m.shape[-2:], mode='bilinear', align_corners=False)
+                    s = s_resized.squeeze(0)
+                # If channel count doesn't match, try to broadcast or raise error
+                if m.shape[0] != s.shape[0]:
+                    if s.shape[0] == 1 and m.shape[0] > 1:
+                        s = s.expand(m.shape[0], *s.shape[1:])
+                    elif m.shape[0] == 1 and s.shape[0] > 1:
+                        m = m.expand(s.shape[0], *m.shape[1:])
+                    else:
+                        raise ValueError(f"Cannot match channel count: mask {m.shape}, sobel {s.shape}")
                 down_block_additional_residuals.append(torch.cat([m.unsqueeze(0), s.unsqueeze(0)], dim=0))
             z_inpaint = model.encode_first_stage(test_model_kwargs['inpaint_image'])
             z_inpaint = model.get_first_stage_encoding(z_inpaint).detach()

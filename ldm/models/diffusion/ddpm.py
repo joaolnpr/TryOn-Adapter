@@ -1626,7 +1626,7 @@ class LatentTryOnDiffusion(LatentDiffusion):
     def __init__(self, first_stage_config, cond_stage_config, *args, **kwargs):
         super().__init__(first_stage_config, cond_stage_config, *args, **kwargs)
         self.vgg = VGG19_feature_color_torchversion(vgg_normal_correct=True)
-        self.vgg.load_state_dict(torch.load("models/vgg/vgg19_conv.pth", map_location="cpu"))
+        self.vgg.load_state_dict(torch.load("/home/paperspace/TryOn-Adapter/models/vgg/vgg19_conv.pth", map_location="cpu"))
         self.vae = AutoencoderKL2.from_pretrained('models/vae', subfolder="vae")
         self.fuse_adapter = Embedding_Adapter()
 

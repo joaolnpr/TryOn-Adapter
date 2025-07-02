@@ -282,8 +282,18 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             patches = model.proj_out_patches(patches)
             c = torch.cat([c, patches], dim=1)
             down_block_additional_residuals = list()
-            mask_resduial = model.adapter_mask(parse_agnostic.cuda() if torch.cuda.is_available() else parse_agnostic)
-            sobel_resduial = model.adapter_canny(sobel_img.cuda() if torch.cuda.is_available() else sobel_img)
+            # Fix channel mismatch for adapters
+            # adapter_mask expects 192 channels (3*64), adapter_canny expects 64 channels
+            # The adapters use pixel unshuffle, so we need to create the right input format
+            
+            # For parse_agnostic: convert 1 channel to 192 channels (3*64)
+            parse_agnostic_input = parse_agnostic.repeat(1, 192, 1, 1)  # Repeat to 192 channels
+            
+            # For sobel_img: convert 1 channel to 64 channels  
+            sobel_img_input = sobel_img.repeat(1, 64, 1, 1)  # Repeat to 64 channels
+            
+            mask_resduial = model.adapter_mask(parse_agnostic_input.cuda() if torch.cuda.is_available() else parse_agnostic_input)
+            sobel_resduial = model.adapter_canny(sobel_img_input.cuda() if torch.cuda.is_available() else sobel_img_input)
             for i in range(len(mask_resduial)):
                 down_block_additional_residuals.append(torch.cat([mask_resduial[i].unsqueeze(0), sobel_resduial[i].unsqueeze(0)],dim=0))
             z_inpaint = model.encode_first_stage(test_model_kwargs['inpaint_image'])

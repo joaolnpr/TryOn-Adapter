@@ -1,4 +1,3 @@
-
 # coding=utf-8
 import os
 
@@ -262,18 +261,32 @@ class CPDataset(data.Dataset):
         else:
             warped_cloth_name = im_name.replace('image', 'train_paired/warped').replace('jpg','png')
 
-        warped_cloth = Image.open(osp.join(self.data_path, warped_cloth_name))
-        warped_cloth = transforms.Resize(self.crop_size, interpolation=2)(warped_cloth)
-        warped_cloth = self.transform(warped_cloth)
+        # Handle missing warped cloth file for single inference
+        warped_cloth_path = osp.join(self.data_path, warped_cloth_name)
+        if os.path.exists(warped_cloth_path):
+            warped_cloth = Image.open(warped_cloth_path)
+            warped_cloth = transforms.Resize(self.crop_size, interpolation=2)(warped_cloth)
+            warped_cloth = self.transform(warped_cloth)
+        else:
+            # Create placeholder warped cloth from original cloth
+            warped_cloth = c[key].clone()
+        
         if self.datamode == 'test':
             warped_cloth_mask_name = im_name.replace('image','test_paired/mask' if not self.unpaired else 'test_unpaired/mask').replace('jpg','png')
         else:
             warped_cloth_mask_name = im_name.replace('image','train_paired/mask').replace('jpg','png')
             
-        warped_cloth_mask = Image.open(osp.join(self.data_path, warped_cloth_mask_name))
-        warped_cloth_mask = transforms.Resize(self.crop_size, interpolation=transforms.InterpolationMode.NEAREST) \
-            (warped_cloth_mask)
-        warped_cloth_mask = self.toTensor(warped_cloth_mask)
+        # Handle missing warped cloth mask file for single inference
+        warped_cloth_mask_path = osp.join(self.data_path, warped_cloth_mask_name)
+        if os.path.exists(warped_cloth_mask_path):
+            warped_cloth_mask = Image.open(warped_cloth_mask_path)
+            warped_cloth_mask = transforms.Resize(self.crop_size, interpolation=transforms.InterpolationMode.NEAREST) \
+                (warped_cloth_mask)
+            warped_cloth_mask = self.toTensor(warped_cloth_mask)
+        else:
+            # Create placeholder warped cloth mask
+            warped_cloth_mask = cm[key].clone()
+        
         warped_cloth = warped_cloth * warped_cloth_mask
 
         feat = warped_cloth * (1 - inpaint_mask) + im * inpaint_mask
@@ -283,10 +296,17 @@ class CPDataset(data.Dataset):
             seg_predicts_name = im_name.replace('image', 'test_paired/seg_preds' if not self.unpaired else 'test_unpaired/seg_preds').replace('jpg','png')
         else:
             seg_predicts_name = im_name.replace('image', 'train_paired/seg_preds').replace('jpg','png')
-        seg_predicts = Image.open(osp.join(self.data_path, seg_predicts_name))
-        seg_predicts = transforms.Resize(self.crop_size, interpolation=transforms.InterpolationMode.NEAREST) \
-            (seg_predicts)
-        seg_predicts = self.toTensor(seg_predicts)
+        
+        # Handle missing seg_predicts file for single inference
+        seg_predicts_path = osp.join(self.data_path, seg_predicts_name)
+        if os.path.exists(seg_predicts_path):
+            seg_predicts = Image.open(seg_predicts_path)
+            seg_predicts = transforms.Resize(self.crop_size, interpolation=transforms.InterpolationMode.NEAREST) \
+                (seg_predicts)
+            seg_predicts = self.toTensor(seg_predicts)
+        else:
+            # Create placeholder seg_predicts from parse image
+            seg_predicts = parse_onehot
         
         sobel_img_or =  cv2.imread(osp.join(self.data_path, warped_cloth_name), cv2.IMREAD_GRAYSCALE)
         sobel_img_or = cv2.resize(sobel_img_or,(384,512))
@@ -309,26 +329,44 @@ class CPDataset(data.Dataset):
         
         # load pose image
         pose_name = im_name.replace('image', 'openpose_img').replace('.jpg', '_rendered.png')
-        pose_rgb = Image.open(osp.join(self.data_path, pose_name))
-        pose_rgb = transforms.Resize(self.crop_size, interpolation=2)(pose_rgb)
-        pose_rgb = self.transform(pose_rgb)  # [-1,1]
+        pose_path = osp.join(self.data_path, pose_name)
+        if os.path.exists(pose_path):
+            pose_rgb = Image.open(pose_path)
+            pose_rgb = transforms.Resize(self.crop_size, interpolation=2)(pose_rgb)
+            pose_rgb = self.transform(pose_rgb)  # [-1,1]
+        else:
+            # Create placeholder pose image (black image)
+            pose_rgb = torch.zeros_like(im)
 
         # load pose points
         pose_name = im_name.replace('image', 'openpose_json').replace('.jpg', '_keypoints.json')
-        with open(osp.join(self.data_path, pose_name), 'r') as f:
-            pose_label = json.load(f)
-            pose_data = pose_label['people'][0]['pose_keypoints_2d']
-            pose_data = np.array(pose_data)
-            pose_data = pose_data.reshape((-1, 3))[:, :2]
+        pose_json_path = osp.join(self.data_path, pose_name)
+        if os.path.exists(pose_json_path):
+            with open(pose_json_path, 'r') as f:
+                pose_label = json.load(f)
+                pose_data = pose_label['people'][0]['pose_keypoints_2d']
+                pose_data = np.array(pose_data)
+                pose_data = pose_data.reshape((-1, 3))[:, :2]
+        else:
+            # Create placeholder pose data (centered pose)
+            pose_data = np.zeros((18, 2))
+            pose_data[:, 0] = self.fine_width // 2  # x coordinates
+            pose_data[:, 1] = self.fine_height // 2  # y coordinates
         agnostic = self.get_agnostic(im_pil_big, im_parse_pil_big, pose_data)
         agnostic = transforms.Resize(self.crop_size, interpolation=2)(agnostic)
         agnostic = self.transform(agnostic)
 
         # load image-parse-agnostic
         parse_name = im_name.replace('image', 'image-parse-agnostic-v3.2').replace('.jpg', '.png')
-        image_parse_agnostic = Image.open(osp.join(self.data_path, parse_name))
-        image_parse_agnostic = transforms.Resize(self.crop_size, interpolation=0)(image_parse_agnostic)
-        parse_agnostic = torch.from_numpy(np.array(image_parse_agnostic)[None]).long()
+        parse_agnostic_path = osp.join(self.data_path, parse_name)
+        if os.path.exists(parse_agnostic_path):
+            image_parse_agnostic = Image.open(parse_agnostic_path)
+            image_parse_agnostic = transforms.Resize(self.crop_size, interpolation=0)(image_parse_agnostic)
+            parse_agnostic = torch.from_numpy(np.array(image_parse_agnostic)[None]).long()
+        else:
+            # Create placeholder parse agnostic from regular parse
+            parse_agnostic = parse.clone()
+        
         parse_agnostic_map = torch.FloatTensor(20, self.fine_height, self.fine_width).zero_()
         parse_agnostic_map = parse_agnostic_map.scatter_(0, parse_agnostic, 1.0)
         new_parse_agnostic_map = torch.FloatTensor(self.semantic_nc, self.fine_height, self.fine_width).zero_()

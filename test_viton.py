@@ -214,26 +214,6 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
     dataset_dir = os.path.dirname(os.path.dirname(temp_dataset_dir))  # .../test/
     dataroot = os.getcwd()  # Use current working directory where test_pairs.txt is located
     
-    print(f"Debug paths:")
-    print(f"  mask_path: {mask_path}")
-    print(f"  temp_dataset_dir: {temp_dataset_dir}")
-    print(f"  dataset_dir: {dataset_dir}")
-    print(f"  dataroot: {dataroot}")
-    print(f"  test_pairs.txt expected at: {os.path.join(dataroot, 'test_pairs.txt')}")
-    print(f"  Current working directory: {os.getcwd()}")
-    
-    # Check if test_pairs.txt exists
-    test_pairs_path = os.path.join(dataroot, 'test_pairs.txt')
-    if os.path.exists(test_pairs_path):
-        print(f"  test_pairs.txt found at: {test_pairs_path}")
-    else:
-        print(f"  test_pairs.txt NOT found at: {test_pairs_path}")
-        # List files in dataroot
-        if os.path.exists(dataroot):
-            print(f"  Files in dataroot: {os.listdir(dataroot)}")
-        else:
-            print(f"  dataroot directory does not exist")
-    
     # All files should already be present: person, cloth, cloth-mask, mask
 
     # Check all required files

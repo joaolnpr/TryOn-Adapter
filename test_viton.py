@@ -36,6 +36,10 @@ import subprocess
 import shutil
 import logging
 
+# Memory management settings
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+torch.cuda.empty_cache()
+
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
 def load_checkpoint(model, checkpoint_path):
@@ -208,6 +212,10 @@ def run_human_parser(input_image_path, output_mask_path):
         logging.warning(f"Cleanup failed: {e}")
 
 def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path, config_path, ckpt_path, ckpt_elbm_path, device, H=512, W=512):
+    # Clear GPU memory before starting
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    
     # Prepare temp dataset structure
     test_id = "test_001"
     temp_dataset_dir = os.path.dirname(mask_path)  # Should be .../test/image-parse-v3/
@@ -226,6 +234,7 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
     model = load_model_from_config(config, f"{ckpt_path}")
     if torch.cuda.is_available():
         model = model.cuda()
+        torch.cuda.empty_cache()  # Clear memory after model loading
     model.eval()
     dataset = CPDataset(dataroot, H, mode='test', unpaired=True)
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, pin_memory=True)
@@ -245,6 +254,7 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
     emasc.load_state_dict(emasac_sd)
     if torch.cuda.is_available():
         emasc.cuda()
+        torch.cuda.empty_cache()  # Clear memory after EMASC loading
     emasc.eval()
     sampler = DDIMSampler(model)
     gauss = tgm.image.GaussianBlur((15, 15), (3, 3))
@@ -303,11 +313,19 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             test_model_kwargs['inpaint_mask'] = resize(test_model_kwargs['inpaint_mask'])
             warp_feat = model.encode_first_stage(feat_tensor)
             warp_feat = model.get_first_stage_encoding(warp_feat).detach()
+            
+            # Clear memory after encoding operations
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             ts = torch.full((1,), 999, device=device, dtype=torch.long)
             start_code = model.q_sample(warp_feat, ts)
             shape = [4, H // 8, W // 8]
             samples_ddim, _ = sampler.sample(S=100, conditioning=c, batch_size=1, shape=shape, down_block_additional_residuals=down_block_additional_residuals, verbose=False, unconditional_guidance_scale=1, unconditional_conditioning=uc, eta=0.0, x_T=start_code, use_T_repaint=True, test_model_kwargs=test_model_kwargs)
             samples_ddim = 1/ 0.18215 * samples_ddim
+            
+            # Clear memory after sampling
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             _, intermediate_features = model.vae.encode(data["im_mask"].cuda() if torch.cuda.is_available() else data["im_mask"])
             intermediate_features = [intermediate_features[i] for i in int_layers]
             processed_intermediate_features = emasc(intermediate_features)
@@ -323,8 +341,16 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 save_x = 255. * rearrange(save_x.cpu().numpy(), 'c h w -> h w c')
                 img = Image.fromarray(save_x.astype(np.uint8))
                 img.save(output_path)
+    
+    # Final memory cleanup
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 def main():
+    # Clear GPU memory at start
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    
     parser = argparse.ArgumentParser()
     parser.add_argument('--person_image', type=str, required=True)
     parser.add_argument('--cloth_image', type=str, required=True)

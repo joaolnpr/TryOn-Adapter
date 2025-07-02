@@ -283,57 +283,37 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             cm = data['cloth_mask'][key]
             c = data['cloth'][key]
             test_model_kwargs = {}
-            # Convert all input tensors to half and move to CUDA if available, except ref_tensor for CLIP/conditioning
-            def to_half_cuda(t):
-                if torch.cuda.is_available():
+            # Helper to move tensors to correct dtype/device for VAE/UNet
+            def to_model_dtype(t):
+                if next(model.parameters()).is_cuda:
                     return t.half().cuda()
                 else:
-                    return t
-            mask_tensor = to_half_cuda(mask_tensor)
-            inpaint_image = to_half_cuda(inpaint_image)
-            feat_tensor = to_half_cuda(feat_tensor)
-            sobel_img = to_half_cuda(sobel_img)
-            parse_agnostic = to_half_cuda(parse_agnostic)
-            warp_mask = to_half_cuda(warp_mask)
-            new_mask = to_half_cuda(new_mask)
-            cm = to_half_cuda(cm)
-            c = to_half_cuda(c)
-            image_tensor = to_half_cuda(image_tensor)
-            pose = to_half_cuda(pose)
-            if torch.cuda.is_available():
+                    return t.float()
+            mask_tensor = to_model_dtype(mask_tensor)
+            inpaint_image = to_model_dtype(inpaint_image)
+            feat_tensor = to_model_dtype(feat_tensor)
+            sobel_img = to_model_dtype(sobel_img)
+            parse_agnostic = to_model_dtype(parse_agnostic)
+            warp_mask = to_model_dtype(warp_mask)
+            new_mask = to_model_dtype(new_mask)
+            cm = to_model_dtype(cm)
+            c = to_model_dtype(c)
+            image_tensor = to_model_dtype(image_tensor)
+            pose = to_model_dtype(pose)
+            # Prepare ref_tensor_half for VAE/UNet
+            if next(model.parameters()).is_cuda:
                 ref_tensor_half = ref_tensor.half().cuda()
             else:
-                ref_tensor_half = ref_tensor
-            # Prepare clip_input for CLIP/conditioning (always float32 and correct device)
-            clip_input = clip_normalize(ref_tensor)
-            clip_input = clip_input.float()
-            if torch.cuda.is_available():
-                clip_input = clip_input.cuda()
-            test_model_kwargs['inpaint_mask'] = mask_tensor
-            test_model_kwargs['inpaint_image'] = inpaint_image
-            test_model_kwargs['warp_feat'] = feat_tensor
-            test_model_kwargs['new_mask'] = new_mask
-            feat_tensor = feat_tensor
-            uc = None
-            # Print memory summary before encoding
-            if torch.cuda.is_available():
-                print(torch.cuda.memory_summary())
-            # Use ref_tensor_half for VAE/UNet, clip_input (float32) for CLIP/conditioning
-            c_vae = model.encode_first_stage(vae_normalize(ref_tensor_half))
-            c_vae = model.get_first_stage_encoding(c_vae).detach()
-            c, patches = model.get_learned_conditioning(clip_input)
-            patches = model.fuse_adapter(patches,c_vae)
-            c = model.proj_out(c)
-            patches = model.proj_out_patches(patches)
-            c = torch.cat([c, patches], dim=1)
-            down_block_additional_residuals = list()
-            # For parse_agnostic: convert 1 channel to 3 channels (192/64)
+                ref_tensor_half = ref_tensor.float()
+            # Prepare parse_agnostic_input and sobel_img_input for adapters
             parse_agnostic_input = parse_agnostic.repeat(1, 3, 1, 1)
-            # For sobel_img: keep 1 channel (64/64)
             sobel_img_input = sobel_img
-            if torch.cuda.is_available():
+            if next(model.parameters()).is_cuda:
                 parse_agnostic_input = parse_agnostic_input.half().cuda()
                 sobel_img_input = sobel_img_input.half().cuda()
+            else:
+                parse_agnostic_input = parse_agnostic_input.float()
+                sobel_img_input = sobel_img_input.float()
             mask_resduial = model.adapter_mask(parse_agnostic_input)
             sobel_resduial = model.adapter_canny(sobel_img_input)
             for i in range(len(mask_resduial)):

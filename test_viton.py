@@ -408,10 +408,17 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                             print(f"DEBUG: c_vae shape before adapter: {c_vae.shape}")
                             print(f"DEBUG: patches shape before adapter: {patches.shape}")
                             
-                            # FIXED: The adapter expects 4D tensor, not reshaped to 3D
-                            # Keep c_vae in its original 4D format [B, C, H, W]
-                            patches = model.fuse_adapter(patches, c_vae)
-                            print("DEBUG: Adapter fusion successful")
+                            # FIXED: Correct tensor reshaping for adapter fusion
+                            # The adapter expects: patches [B, N, D] and c_vae [B, H*W, C]
+                            B, C, H, W = c_vae.shape
+                            c_vae_reshaped = c_vae.permute(0, 2, 3, 1).reshape(B, H*W, C)  # [B, H*W, C]
+                            
+                            print(f"DEBUG: c_vae_reshaped shape: {c_vae_reshaped.shape}")
+                            print(f"DEBUG: Expected adapter input dimensions: patches={patches.shape}, c_vae_reshaped={c_vae_reshaped.shape}")
+                            
+                            # Try the adapter fusion with correct dimensions
+                            patches = model.fuse_adapter(patches, c_vae_reshaped)
+                            print("DEBUG: Adapter fusion successful - clothing should now adapt to body shape!")
                         except Exception as e:
                             print(f"DEBUG: Adapter fusion failed: {e}")
                             print("DEBUG: Continuing without adapter fusion...")

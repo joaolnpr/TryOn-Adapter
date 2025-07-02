@@ -279,6 +279,20 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             cm = data['cloth_mask'][key]
             c = data['cloth'][key]
             test_model_kwargs = {}
+            # Convert all input tensors to half if CUDA is available
+            if torch.cuda.is_available():
+                mask_tensor = mask_tensor.half()
+                inpaint_image = inpaint_image.half()
+                ref_tensor = ref_tensor.half()
+                feat_tensor = feat_tensor.half()
+                sobel_img = sobel_img.half()
+                parse_agnostic = parse_agnostic.half()
+                warp_mask = warp_mask.half()
+                new_mask = new_mask.half()
+                cm = cm.half()
+                c = c.half()
+                image_tensor = image_tensor.half()
+                pose = pose.half()
             test_model_kwargs['inpaint_mask'] = mask_tensor.cuda() if torch.cuda.is_available() else mask_tensor
             test_model_kwargs['inpaint_image'] = inpaint_image.cuda() if torch.cuda.is_available() else inpaint_image
             test_model_kwargs['warp_feat'] = feat_tensor.cuda() if torch.cuda.is_available() else feat_tensor
@@ -301,13 +315,13 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             # adapter_mask expects 192 channels (3*64), adapter_canny expects 64 channels
             # The adapters use pixel unshuffle(8) which multiplies channels by 64
             # So we need: 192/64 = 3 channels for mask, 64/64 = 1 channel for sobel
-            
             # For parse_agnostic: convert 1 channel to 3 channels (192/64)
             parse_agnostic_input = parse_agnostic.repeat(1, 3, 1, 1)  # 1 -> 3 channels
-            
             # For sobel_img: keep 1 channel (64/64)  
             sobel_img_input = sobel_img  # Already 1 channel
-            
+            if torch.cuda.is_available():
+                parse_agnostic_input = parse_agnostic_input.half()
+                sobel_img_input = sobel_img_input.half()
             mask_resduial = model.adapter_mask(parse_agnostic_input.cuda() if torch.cuda.is_available() else parse_agnostic_input)
             sobel_resduial = model.adapter_canny(sobel_img_input.cuda() if torch.cuda.is_available() else sobel_img_input)
             for i in range(len(mask_resduial)):

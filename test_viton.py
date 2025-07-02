@@ -365,6 +365,7 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             model_device = next(model.parameters()).device
             warp_feat = warp_feat.to(model_device)
             ts = torch.full((1,), 999, device=device, dtype=torch.long).to(model_device)
+            uc = None
             start_code = model.q_sample(warp_feat, ts)
             shape = [4, H // 8, W // 8]
             samples_ddim, _ = sampler.sample(S=100, conditioning=c, batch_size=1, shape=shape, down_block_additional_residuals=down_block_additional_residuals, verbose=False, unconditional_guidance_scale=1, unconditional_conditioning=uc, eta=0.0, x_T=start_code, use_T_repaint=True, test_model_kwargs=test_model_kwargs)

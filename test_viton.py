@@ -350,7 +350,26 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 
                 # Fuse the features (this might need the fuse_adapter method)
                 if hasattr(model, 'fuse_adapter'):
-                    patches = model.fuse_adapter(patches, c_vae)
+                    try:
+                        # Reshape VAE features to match adapter expectations
+                        print(f"DEBUG: c_vae shape before adapter: {c_vae.shape}")
+                        print(f"DEBUG: patches shape before adapter: {patches.shape}")
+                        
+                        # The adapter expects flattened spatial features
+                        # Reshape c_vae from [B, C, H, W] to [B, H*W, C] if needed
+                        if len(c_vae.shape) == 4:
+                            B, C, H, W = c_vae.shape
+                            c_vae_reshaped = c_vae.permute(0, 2, 3, 1).reshape(B, H*W, C)
+                        else:
+                            c_vae_reshaped = c_vae
+                        
+                        print(f"DEBUG: c_vae_reshaped shape: {c_vae_reshaped.shape}")
+                        patches = model.fuse_adapter(patches, c_vae_reshaped)
+                        print("DEBUG: Adapter fusion successful")
+                    except Exception as e:
+                        print(f"DEBUG: Adapter fusion failed: {e}")
+                        print("DEBUG: Continuing without adapter fusion...")
+                        # Continue without fusion if it fails
                 
                 # Project the features
                 c_proj = model.proj_out(c_clip)
@@ -360,6 +379,10 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 c_encoded = torch.cat([c_proj, patches_proj], dim=1)
                 
                 # Clean up intermediate tensors
+                try:
+                    del c_vae_reshaped
+                except:
+                    pass
                 del c_vae, c_clip, patches, c_proj, patches_proj
                 clear_gpu_memory()
             else:

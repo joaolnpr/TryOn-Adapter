@@ -181,7 +181,9 @@ class CPDataset(data.Dataset):
                                           'black')
             mask_arm_draw.ellipse((pointx - r * 4, pointy - r * 4, pointx + r * 4, pointy + r * 4), 'black', 'black')
 
-            parse_arm = (np.array(mask_arm) / 255) * (parse_array == parse_id).astype(np.float32)
+            # Resize parse_array to match mask_arm dimensions
+            parse_array_resized = np.array(im_parse.resize((self.fine_width, self.fine_height), Image.NEAREST))
+            parse_arm = (np.array(mask_arm) / 255) * (parse_array_resized == parse_id).astype(np.float32)
             agnostic.paste(im, None, Image.fromarray(np.uint8(parse_arm * 255), 'L'))
 
         agnostic.paste(im, None, Image.fromarray(np.uint8(parse_head * 255), 'L'))

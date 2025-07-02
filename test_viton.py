@@ -362,19 +362,9 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                     else:
                         raise ValueError(f"Cannot match channel count: mask {m.shape}, sobel {s.shape}")
                 down_block_additional_residuals.append(torch.cat([m.unsqueeze(0), s.unsqueeze(0)], dim=0))
-            # Use the actual shape of warp_feat for resizing
-            latent_shape = feat_tensor.shape[-2:]
-            inpaint_image_resized = F.interpolate(inpaint_image, size=latent_shape, mode='bilinear', align_corners=False)
-            inpaint_mask_resized = F.interpolate(mask_tensor, size=latent_shape, mode='nearest')
-            test_model_kwargs['inpaint_mask'] = inpaint_mask_resized
-            test_model_kwargs['inpaint_image'] = inpaint_image_resized
+            # Initial setup with feat_tensor in test_model_kwargs (will be overridden later with latent versions)
             test_model_kwargs['warp_feat'] = feat_tensor
             test_model_kwargs['new_mask'] = new_mask
-            # Check that all required keys are present in test_model_kwargs before use
-            required_keys = ['inpaint_image', 'inpaint_mask', 'warp_feat', 'new_mask']
-            for k in required_keys:
-                if k not in test_model_kwargs:
-                    raise KeyError(f"Missing key '{k}' in test_model_kwargs. Current keys: {list(test_model_kwargs.keys())}")
             # Clear memory before encoding
             clear_gpu_memory()
             
@@ -395,27 +385,31 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             # Clean up temporary tensor
             del mask_tensor_3ch
             
-            # Get latent shape for resizing (using already computed latent_shape)
-            z_inpaint_resized = F.interpolate(z_inpaint, size=latent_shape, mode='bilinear', align_corners=False)
-            z_mask_resized = F.interpolate(z_mask, size=latent_shape, mode='nearest')
-            
-            # Encode feat_tensor before cleanup
+            # Encode feat_tensor to get the proper latent dimensions
             warp_feat_encoded = model.encode_first_stage(feat_tensor)
             warp_feat_encoded = model.get_first_stage_encoding(warp_feat_encoded).detach()
             
+            # Use the encoded warp_feat shape for proper latent space dimensions
+            latent_spatial_shape = warp_feat_encoded.shape[-2:]
+            z_inpaint_resized = F.interpolate(z_inpaint, size=latent_spatial_shape, mode='bilinear', align_corners=False)
+            z_mask_resized = F.interpolate(z_mask, size=latent_spatial_shape, mode='nearest')
+            
+            # Set up the properly sized latent tensors for diffusion
             test_model_kwargs['inpaint_mask'] = z_mask_resized
             test_model_kwargs['inpaint_image'] = z_inpaint_resized
             test_model_kwargs['warp_feat'] = feat_tensor
             test_model_kwargs['new_mask'] = new_mask
-            # Check that all required keys are present in test_model_kwargs before use
+            test_model_kwargs['x_inpaint'] = z_inpaint
+            
+            # Verify all required keys are present
             required_keys = ['inpaint_image', 'inpaint_mask', 'warp_feat', 'new_mask']
             for k in required_keys:
                 if k not in test_model_kwargs:
                     raise KeyError(f"Missing key '{k}' in test_model_kwargs. Current keys: {list(test_model_kwargs.keys())}")
-            # Use a separate variable for the encoded version
-            test_model_kwargs['x_inpaint'] = z_inpaint
-            # If you need to use z_inpaint downstream, pass it directly as a variable, not by overwriting the dictionary key
-            test_model_kwargs['inpaint_mask'] = resize(test_model_kwargs['inpaint_mask'])
+            
+            print(f"DEBUG: Final tensor shapes for diffusion:")
+            print(f"  inpaint_image: {test_model_kwargs['inpaint_image'].shape}")
+            print(f"  inpaint_mask: {test_model_kwargs['inpaint_mask'].shape}")
             
             # Clear memory after encoding operations
             del feat_tensor  # Now we can delete this as we have the encoded version
@@ -428,8 +422,9 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             shape = [4, H // 8, W // 8]
             # Debug print shapes before sampling
             print("DEBUG: start_code shape:", start_code.shape)
-            print("DEBUG: inpaint_image_resized shape:", inpaint_image_resized.shape)
-            print("DEBUG: inpaint_mask_resized shape:", inpaint_mask_resized.shape)
+            print("DEBUG: z_inpaint_resized shape:", test_model_kwargs['inpaint_image'].shape)
+            print("DEBUG: z_mask_resized shape:", test_model_kwargs['inpaint_mask'].shape)
+            print("DEBUG: warp_feat_encoded shape:", warp_feat_encoded.shape)
             samples_ddim, _ = sampler.sample(S=100, conditioning=c, batch_size=1, shape=shape, down_block_additional_residuals=down_block_additional_residuals, verbose=False, unconditional_guidance_scale=1, unconditional_conditioning=uc, eta=0.0, x_T=start_code, use_T_repaint=True, test_model_kwargs=test_model_kwargs, **test_model_kwargs)
             samples_ddim = 1/ 0.18215 * samples_ddim
             

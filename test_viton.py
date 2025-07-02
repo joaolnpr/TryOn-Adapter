@@ -316,6 +316,8 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 sobel_img_input = sobel_img_input.float()
             mask_resduial = model.adapter_mask(parse_agnostic_input)
             sobel_resduial = model.adapter_canny(sobel_img_input)
+            # Initialize down_block_additional_residuals before appending
+            down_block_additional_residuals = []
             for i in range(len(mask_resduial)):
                 down_block_additional_residuals.append(torch.cat([mask_resduial[i].unsqueeze(0), sobel_resduial[i].unsqueeze(0)],dim=0))
             z_inpaint = model.encode_first_stage(test_model_kwargs['inpaint_image'])

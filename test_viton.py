@@ -359,7 +359,7 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             warp_feat = model.get_first_stage_encoding(warp_feat).detach()
             
             # Clear memory after encoding operations
-            del mask_tensor, inpaint_image, ref_tensor, feat_tensor, image_tensor, pose, sobel_img, parse_agnostic, warp_mask, new_mask, cm, c_vae, patches
+            del mask_tensor, inpaint_image, ref_tensor, feat_tensor, image_tensor, pose, sobel_img, parse_agnostic, warp_mask, new_mask, cm
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             ts = torch.full((1,), 999, device=device, dtype=torch.long)

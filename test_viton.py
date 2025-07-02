@@ -323,11 +323,46 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             image_tensor = to_model_dtype(image_tensor)
             pose = to_model_dtype(pose)
             
-            # Process cloth conditioning to proper format
-            # The cloth needs to be encoded to latent space for proper conditioning
-            c_encoded = model.encode_first_stage(c)
-            c_encoded = model.get_first_stage_encoding(c_encoded).detach()
-            c_encoded = to_model_dtype(c_encoded)
+            # Debug the original cloth tensor format
+            print(f"DEBUG: Original cloth tensor shape: {c.shape}")
+            print(f"DEBUG: Original cloth tensor dtype: {c.dtype}")
+            print(f"DEBUG: Cloth tensor min/max: {c.min()}/{c.max()}")
+            
+            # Check if the cloth tensor is already processed features or raw image
+            if len(c.shape) == 4 and c.shape[1] == 3:
+                # This looks like a raw RGB image, needs processing
+                print("DEBUG: Cloth appears to be raw image, processing with CLIP+VAE...")
+                
+                # Process cloth conditioning properly like in the training code
+                vae_normalize = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                clip_normalize = transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
+                
+                # Process with both VAE and CLIP like the original model
+                c_vae = model.encode_first_stage(vae_normalize(c))
+                c_vae = model.get_first_stage_encoding(c_vae).detach()
+                clear_gpu_memory()  # Clear after VAE encoding
+                
+                c_clip, patches = model.get_learned_conditioning(clip_normalize(c))
+                clear_gpu_memory()  # Clear after CLIP processing
+                
+                # Fuse the features (this might need the fuse_adapter method)
+                if hasattr(model, 'fuse_adapter'):
+                    patches = model.fuse_adapter(patches, c_vae)
+                
+                # Project the features
+                c_proj = model.proj_out(c_clip)
+                patches_proj = model.proj_out_patches(patches)
+                
+                # Concatenate the projected features
+                c_encoded = torch.cat([c_proj, patches_proj], dim=1)
+                
+                # Clean up intermediate tensors
+                del c_vae, c_clip, patches, c_proj, patches_proj
+                clear_gpu_memory()
+            else:
+                # This might already be processed features
+                print("DEBUG: Cloth appears to be processed features, using as-is...")
+                c_encoded = c
             # Prepare ref_tensor_half for VAE/UNet
             if next(model.parameters()).is_cuda:
                 ref_tensor_half = ref_tensor.half().cuda()

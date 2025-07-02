@@ -353,9 +353,25 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             for k in required_keys:
                 if k not in test_model_kwargs:
                     raise KeyError(f"Missing key '{k}' in test_model_kwargs. Current keys: {list(test_model_kwargs.keys())}")
-            # Use a separate variable for the encoded version
+            # Encode inpaint_image and mask_tensor to latent space
             z_inpaint = model.encode_first_stage(inpaint_image)
             z_inpaint = model.get_first_stage_encoding(z_inpaint).detach()
+            z_mask = model.encode_first_stage(mask_tensor)
+            z_mask = model.get_first_stage_encoding(z_mask).detach()
+            # Resize latents to match warp_feat shape
+            latent_shape = warp_feat.shape[-2:]
+            z_inpaint_resized = F.interpolate(z_inpaint, size=latent_shape, mode='bilinear', align_corners=False)
+            z_mask_resized = F.interpolate(z_mask, size=latent_shape, mode='nearest')
+            test_model_kwargs['inpaint_mask'] = z_mask_resized
+            test_model_kwargs['inpaint_image'] = z_inpaint_resized
+            test_model_kwargs['warp_feat'] = feat_tensor
+            test_model_kwargs['new_mask'] = new_mask
+            # Check that all required keys are present in test_model_kwargs before use
+            required_keys = ['inpaint_image', 'inpaint_mask', 'warp_feat', 'new_mask']
+            for k in required_keys:
+                if k not in test_model_kwargs:
+                    raise KeyError(f"Missing key '{k}' in test_model_kwargs. Current keys: {list(test_model_kwargs.keys())}")
+            # Use a separate variable for the encoded version
             test_model_kwargs['x_inpaint'] = z_inpaint
             # If you need to use z_inpaint downstream, pass it directly as a variable, not by overwriting the dictionary key
             test_model_kwargs['inpaint_mask'] = resize(test_model_kwargs['inpaint_mask'])

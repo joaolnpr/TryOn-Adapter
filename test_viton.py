@@ -101,7 +101,13 @@ def load_model_from_config(config, ckpt, verbose=False):
         print(u)
 
     if torch.cuda.is_available():
-        model = model.half().cuda()  # Use half precision on CUDA
+        model = model.cuda()
+        # Only move diffusion/UNet/VAE to half precision, not cond_stage_model (CLIP)
+        if hasattr(model, 'diffusion_model'):
+            model.diffusion_model = model.diffusion_model.half()
+        if hasattr(model, 'first_stage_model'):
+            model.first_stage_model = model.first_stage_model.half()
+        # Do NOT move model.cond_stage_model (CLIP) to half!
     model.eval()
     return model
 

@@ -479,7 +479,10 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             ts = torch.full((1,), 999, device=device, dtype=torch.long).to(model_device)
             uc = None
             start_code = model.q_sample(warp_feat_encoded, ts)
-            shape = [4, H // 8, W // 8]
+            # Calculate proper latent shape based on the actual encoded dimensions
+            actual_latent_shape = warp_feat_encoded.shape[-2:]
+            shape = [4, actual_latent_shape[0], actual_latent_shape[1]]
+            print(f"DEBUG: Calculated shape for sampling: {shape}")
             # Debug print shapes before sampling
             print("DEBUG: start_code shape:", start_code.shape)
             print("DEBUG: z_inpaint_resized shape:", test_model_kwargs['inpaint_image'].shape)
@@ -515,17 +518,23 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             
             processed_intermediate_features = emasc(intermediate_features)
             processed_intermediate_features = mask_features(processed_intermediate_features,(1- data["inpaint_mask"]).to(model_device))
+            print(f"DEBUG: samples_ddim shape: {samples_ddim.shape}")
             x_samples_ddim = model.vae.decode(samples_ddim, processed_intermediate_features, int_layers).sample
+            print(f"DEBUG: VAE decoded shape: {x_samples_ddim.shape}")
             x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
             x_samples_ddim = x_samples_ddim.cpu().permute(0, 2, 3, 1).numpy()
             x_checked_image = x_samples_ddim
             x_checked_image_torch = torch.from_numpy(x_checked_image).permute(0, 3, 1, 2)
             x_result = x_checked_image_torch
+            print(f"DEBUG: Final result shape: {x_result.shape}")
+            
             for i, x_sample in enumerate(x_result):
                 save_x = resize(x_sample)
                 save_x = 255. * rearrange(save_x.cpu().numpy(), 'c h w -> h w c')
                 img = Image.fromarray(save_x.astype(np.uint8))
+                print(f"DEBUG: Saving image with shape {save_x.shape} to {output_path}")
                 img.save(output_path)
+                print(f"DEBUG: Successfully saved result image to {output_path}")
     
     # Final memory cleanup
     clear_gpu_memory()

@@ -279,11 +279,11 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             cm = data['cloth_mask'][key]
             c = data['cloth'][key]
             test_model_kwargs = {}
-            # Convert all input tensors to half if CUDA is available
+            # Convert all input tensors to half if CUDA is available, except ref_tensor for CLIP/conditioning
             if torch.cuda.is_available():
                 mask_tensor = mask_tensor.half()
                 inpaint_image = inpaint_image.half()
-                ref_tensor = ref_tensor.half()
+                ref_tensor_half = ref_tensor.half()
                 feat_tensor = feat_tensor.half()
                 sobel_img = sobel_img.half()
                 parse_agnostic = parse_agnostic.half()
@@ -293,6 +293,8 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 c = c.half()
                 image_tensor = image_tensor.half()
                 pose = pose.half()
+            else:
+                ref_tensor_half = ref_tensor
             test_model_kwargs['inpaint_mask'] = mask_tensor.cuda() if torch.cuda.is_available() else mask_tensor
             test_model_kwargs['inpaint_image'] = inpaint_image.cuda() if torch.cuda.is_available() else inpaint_image
             test_model_kwargs['warp_feat'] = feat_tensor.cuda() if torch.cuda.is_available() else feat_tensor
@@ -303,7 +305,8 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             # Print memory summary before encoding
             if torch.cuda.is_available():
                 print(torch.cuda.memory_summary())
-            c_vae = model.encode_first_stage(vae_normalize(ref_tensor))
+            # Use ref_tensor_half for VAE/UNet, ref_tensor (float32) for CLIP/conditioning
+            c_vae = model.encode_first_stage(vae_normalize(ref_tensor_half))
             c_vae = model.get_first_stage_encoding(c_vae).detach()
             c, patches = model.get_learned_conditioning(clip_normalize(ref_tensor))
             patches = model.fuse_adapter(patches,c_vae)

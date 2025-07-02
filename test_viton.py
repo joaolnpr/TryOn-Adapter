@@ -263,8 +263,9 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             warp_mask = data['warp_mask']
             new_mask = warp_mask
             resize = transforms.Resize((H, int(H / 256 * 192)))
-            cm = data['cloth_mask']['paired']
-            c = data['cloth']['paired']
+            key = 'unpaired' if dataset.unpaired else 'paired'
+            cm = data['cloth_mask'][key]
+            c = data['cloth'][key]
             test_model_kwargs = {}
             test_model_kwargs['inpaint_mask'] = mask_tensor.cuda() if torch.cuda.is_available() else mask_tensor
             test_model_kwargs['inpaint_image'] = inpaint_image.cuda() if torch.cuda.is_available() else inpaint_image

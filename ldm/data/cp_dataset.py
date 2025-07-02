@@ -44,10 +44,19 @@ def img2tensor(imgs, bgr2rgb=True, float32=True):
         return _totensor(imgs, bgr2rgb, float32)
     
 def mask2bbox(mask):
-    up = np.max(np.where(mask)[0])
-    down = np.min(np.where(mask)[0])
-    left = np.min(np.where(mask)[1])
-    right = np.max(np.where(mask)[1])
+    # Handle empty mask
+    if np.sum(mask) == 0:
+        return (0, mask.shape[0], 0, mask.shape[1])
+    
+    # Find non-zero coordinates
+    coords = np.where(mask)
+    if len(coords[0]) == 0:
+        return (0, mask.shape[0], 0, mask.shape[1])
+    
+    up = np.max(coords[0])
+    down = np.min(coords[0])
+    left = np.min(coords[1])
+    right = np.max(coords[1])
     center = ((up + down) // 2, (left + right) // 2)
 
     factor = random.random() * 0.1 + 0.1
@@ -56,6 +65,13 @@ def mask2bbox(mask):
     down = int(max(down * (1 + factor) - center[0] * factor, 0))
     left = int(max(left * (1 + factor) - center[1] * factor, 0))
     right = int(min(right * (1 + factor) - center[1] * factor + 1, mask.shape[1]))
+    
+    # Ensure valid bounds
+    up = min(up, mask.shape[0])
+    down = max(0, min(down, up))
+    right = min(right, mask.shape[1])
+    left = max(0, min(left, right))
+    
     return (down, up, left, right)
 
 class CPDataset(data.Dataset):
@@ -149,8 +165,8 @@ class CPDataset(data.Dataset):
             agnostic_draw.ellipse((pointx - r * 5, pointy - r * 5, pointx + r * 5, pointy + r * 5), 'gray', 'gray')
 
         for parse_id, pose_ids in [(14, [5, 6, 7]), (15, [2, 3, 4])]:
-            # mask_arm = Image.new('L', (self.fine_width, self.fine_height), 'white')
-            mask_arm = Image.new('L', (768, 1024), 'white')
+            # Create mask_arm with the same size as the parse image
+            mask_arm = Image.new('L', (self.fine_width, self.fine_height), 'white')
             mask_arm_draw = ImageDraw.Draw(mask_arm)
             pointx, pointy = pose_data[pose_ids[0]]
             mask_arm_draw.ellipse((pointx - r * 5, pointy - r * 6, pointx + r * 5, pointy + r * 6), 'black', 'black')
@@ -327,10 +343,16 @@ class CPDataset(data.Dataset):
         sobel_combined_image = img2tensor(np.expand_dims(gradient, axis=2), bgr2rgb=True, float32=True) / 255.
         # sobel_combined_image = self.normalize(sobel_combined_image)
 
-        down, up, left, right = mask2bbox(cm[key][0].numpy())
-        ref_image = c[key][:, down:up, left:right]
+        # Handle potential empty mask in mask2bbox
+        cm_numpy = cm[key][0].numpy()
+        if np.sum(cm_numpy) > 0:
+            down, up, left, right = mask2bbox(cm_numpy)
+            ref_image = c[key][:, down:up, left:right]
+        else:
+            # If mask is empty, use the whole image
+            ref_image = c[key]
         ref_image = (ref_image + 1.0) / 2.0
-        ref_image = transforms.Resize((224, 224))(ref_image)
+        ref_image = transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.BILINEAR)(ref_image)
         ref_image = self.clip_normalize(ref_image)
         
         # load pose image
@@ -338,7 +360,7 @@ class CPDataset(data.Dataset):
         pose_path = osp.join(self.data_path, pose_name)
         if os.path.exists(pose_path):
             pose_rgb = Image.open(pose_path)
-            pose_rgb = transforms.Resize(self.crop_size, interpolation=2)(pose_rgb)
+            pose_rgb = transforms.Resize(self.crop_size, interpolation=transforms.InterpolationMode.BILINEAR)(pose_rgb)
             pose_rgb = self.transform(pose_rgb)  # [-1,1]
         else:
             # Create placeholder pose image (black image)
@@ -348,18 +370,34 @@ class CPDataset(data.Dataset):
         pose_name = im_name.replace('image', 'openpose_json').replace('.jpg', '_keypoints.json')
         pose_json_path = osp.join(self.data_path, pose_name)
         if os.path.exists(pose_json_path):
-            with open(pose_json_path, 'r') as f:
-                pose_label = json.load(f)
-                pose_data = pose_label['people'][0]['pose_keypoints_2d']
-                pose_data = np.array(pose_data)
-                pose_data = pose_data.reshape((-1, 3))[:, :2]
+            try:
+                with open(pose_json_path, 'r') as f:
+                    pose_label = json.load(f)
+                    if pose_label['people'] and len(pose_label['people']) > 0:
+                        pose_data = pose_label['people'][0]['pose_keypoints_2d']
+                        pose_data = np.array(pose_data)
+                        pose_data = pose_data.reshape((-1, 3))[:, :2]
+                    else:
+                        # No people detected, use placeholder
+                        pose_data = np.zeros((18, 2))
+                        pose_data[:, 0] = self.fine_width // 2
+                        pose_data[:, 1] = self.fine_height // 2
+            except (json.JSONDecodeError, KeyError, IndexError):
+                # JSON parsing failed, use placeholder
+                pose_data = np.zeros((18, 2))
+                pose_data[:, 0] = self.fine_width // 2
+                pose_data[:, 1] = self.fine_height // 2
         else:
             # Create placeholder pose data (centered pose)
             pose_data = np.zeros((18, 2))
             pose_data[:, 0] = self.fine_width // 2  # x coordinates
             pose_data[:, 1] = self.fine_height // 2  # y coordinates
+        
+        # Ensure pose_data has valid coordinates
+        pose_data = np.clip(pose_data, 0, max(self.fine_width, self.fine_height))
+        
         agnostic = self.get_agnostic(im_pil_big, im_parse_pil_big, pose_data)
-        agnostic = transforms.Resize(self.crop_size, interpolation=2)(agnostic)
+        agnostic = transforms.Resize(self.crop_size, interpolation=transforms.InterpolationMode.BILINEAR)(agnostic)
         agnostic = self.transform(agnostic)
 
         # load image-parse-agnostic
@@ -367,7 +405,7 @@ class CPDataset(data.Dataset):
         parse_agnostic_path = osp.join(self.data_path, parse_name)
         if os.path.exists(parse_agnostic_path):
             image_parse_agnostic = Image.open(parse_agnostic_path)
-            image_parse_agnostic = transforms.Resize(self.crop_size, interpolation=0)(image_parse_agnostic)
+            image_parse_agnostic = transforms.Resize(self.crop_size, interpolation=transforms.InterpolationMode.NEAREST)(image_parse_agnostic)
             parse_agnostic = torch.from_numpy(np.array(image_parse_agnostic)[None]).long()
         else:
             # Create placeholder parse agnostic from regular parse

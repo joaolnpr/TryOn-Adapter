@@ -101,7 +101,7 @@ def load_model_from_config(config, ckpt, verbose=False):
         print(u)
 
     if torch.cuda.is_available():
-        model.cuda()
+        model = model.half().cuda()  # Use half precision on CUDA
     model.eval()
     return model
 

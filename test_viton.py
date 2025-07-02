@@ -321,18 +321,11 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             for i in range(min(len(mask_resduial), len(sobel_resduial))):
                 m = mask_resduial[i]
                 s = sobel_resduial[i]
-                if m.shape != s.shape:
-                    # Ensure s is (C, H, W)
-                    if s.dim() == 3:
-                        s_ = s.unsqueeze(0)  # (1, C, H, W)
-                    elif s.dim() == 4:
-                        s_ = s
-                    else:
-                        raise ValueError(f"Unexpected sobel_resduial[{i}].shape: {s.shape}")
-                    # Interpolate to match mask's spatial size
-                    target_size = m.shape[-2:]
-                    s_resized = F.interpolate(s_, size=target_size, mode='bilinear', align_corners=False)
-                    s = s_resized.squeeze(0)
+                # Ensure m and s are 3D (C, H, W)
+                if m.dim() > 3:
+                    m = m.squeeze(0)
+                if s.dim() > 3:
+                    s = s.squeeze(0)
                 down_block_additional_residuals.append(torch.cat([m.unsqueeze(0), s.unsqueeze(0)], dim=0))
             z_inpaint = model.encode_first_stage(test_model_kwargs['inpaint_image'])
             z_inpaint = model.get_first_stage_encoding(z_inpaint).detach()

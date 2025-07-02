@@ -548,7 +548,6 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                     if mask_single_channel.mean() < 0.15:
                         print("DEBUG: Expanding small human parsing mask...")
                         # Dilate the mask to make it larger
-                        import torch.nn.functional as F
                         kernel = torch.ones(1, 1, 15, 15, device=mask_single_channel.device) / 225
                         mask_single_channel = F.conv2d(mask_single_channel, kernel, padding=7)
                         mask_single_channel = (mask_single_channel > 0.3).float()

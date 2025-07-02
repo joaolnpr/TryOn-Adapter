@@ -318,8 +318,13 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             sobel_resduial = model.adapter_canny(sobel_img_input)
             # Initialize down_block_additional_residuals before appending
             down_block_additional_residuals = []
-            for i in range(len(mask_resduial)):
-                down_block_additional_residuals.append(torch.cat([mask_resduial[i].unsqueeze(0), sobel_resduial[i].unsqueeze(0)],dim=0))
+            for i in range(min(len(mask_resduial), len(sobel_resduial))):
+                m = mask_resduial[i]
+                s = sobel_resduial[i]
+                if m.shape != s.shape:
+                    # Resize sobel to match mask spatial dimensions
+                    s = F.interpolate(s.unsqueeze(0), size=m.shape[-2:], mode='bilinear', align_corners=False).squeeze(0)
+                down_block_additional_residuals.append(torch.cat([m.unsqueeze(0), s.unsqueeze(0)], dim=0))
             z_inpaint = model.encode_first_stage(test_model_kwargs['inpaint_image'])
             z_inpaint = model.get_first_stage_encoding(z_inpaint).detach()
             test_model_kwargs['inpaint_image'] = z_inpaint

@@ -348,6 +348,14 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 del c_resized  # Clean up resized tensor
                 clear_gpu_memory()  # Clear after CLIP processing
                 
+                # ENHANCE: Amplify the cloth conditioning signal
+                print(f"DEBUG: Original c_clip stats - min: {c_clip.min()}, max: {c_clip.max()}, std: {c_clip.std()}")
+                print(f"DEBUG: Original patches stats - min: {patches.min()}, max: {patches.max()}, std: {patches.std()}")
+                
+                # Amplify the conditioning signal to make it stronger (CRITICAL for cloth application)
+                c_clip = c_clip * 1.5  # Boost the conditioning strength
+                patches = patches * 1.5
+                
                 # Fuse the features (this might need the fuse_adapter method)
                 if hasattr(model, 'fuse_adapter'):
                     try:
@@ -451,6 +459,24 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             
             # For the UNet input, keep mask as single channel and resize to latent space
             mask_single_channel = mask_tensor if mask_tensor.shape[1] == 1 else mask_tensor[:, :1, :, :]  # Ensure single channel
+            
+            # CRITICAL: Ensure the mask is properly inverted (1 = areas to inpaint/replace, 0 = areas to keep)
+            print(f"DEBUG: Original mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
+            
+            # Make sure we have a clear inpainting mask for the torso area
+            if mask_single_channel.mean() < 0.1:  # If mask is mostly zeros, create a torso mask
+                print("DEBUG: Creating enhanced torso inpainting mask...")
+                B, C, H, W = mask_single_channel.shape
+                enhanced_mask = torch.zeros_like(mask_single_channel)
+                # Create torso region mask (where clothing should be applied)
+                torso_top = int(0.2 * H)
+                torso_bottom = int(0.7 * H) 
+                torso_left = int(0.25 * W)
+                torso_right = int(0.75 * W)
+                enhanced_mask[:, :, torso_top:torso_bottom, torso_left:torso_right] = 1.0
+                mask_single_channel = enhanced_mask
+                print(f"DEBUG: Enhanced mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
+            
             mask_latent_resized = F.interpolate(mask_single_channel, size=latent_spatial_shape, mode='nearest')
             
             # Set up the properly sized latent tensors for diffusion
@@ -477,8 +503,17 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             model_device = next(model.parameters()).device
             warp_feat_encoded = warp_feat_encoded.to(model_device)
             ts = torch.full((1,), 999, device=device, dtype=torch.long).to(model_device)
-            uc = None
-            start_code = model.q_sample(warp_feat_encoded, ts)
+            
+            # Create proper unconditional conditioning for guidance (CRITICAL FIX!)
+            print("DEBUG: Creating unconditional conditioning for proper guidance...")
+            uc = model.get_learned_conditioning(torch.zeros_like(c_encoded))
+            
+            # CRITICAL FIX: Use random noise instead of q_sample from warped features
+            # This prevents the model from just reconstructing the input
+            print("DEBUG: Using random noise initialization instead of q_sample...")
+            start_code = torch.randn_like(warp_feat_encoded) * 0.8
+            # Optionally blend with some original signal but heavily weighted toward noise
+            # start_code = 0.8 * torch.randn_like(warp_feat_encoded) + 0.2 * model.q_sample(warp_feat_encoded, ts)
             # Calculate proper latent shape based on the actual encoded dimensions
             actual_latent_shape = warp_feat_encoded.shape[-2:]
             shape = [4, actual_latent_shape[0], actual_latent_shape[1]]
@@ -490,7 +525,11 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             print("DEBUG: warp_feat_encoded shape:", warp_feat_encoded.shape)
             print("DEBUG: Total input channels will be:", start_code.shape[1] + test_model_kwargs['inpaint_image'].shape[1] + test_model_kwargs['inpaint_mask'].shape[1])
             print("DEBUG: Cloth conditioning shape:", c_encoded.shape)
-            samples_ddim, _ = sampler.sample(S=20, conditioning=c_encoded, batch_size=1, shape=shape, down_block_additional_residuals=down_block_additional_residuals, verbose=False, unconditional_guidance_scale=1, unconditional_conditioning=uc, eta=0.0, x_T=start_code, use_T_repaint=True, test_model_kwargs=test_model_kwargs, **test_model_kwargs)
+            print("DEBUG: Unconditional conditioning shape:", uc.shape)
+            print("DEBUG: Using guidance scale 7.5 to FORCE the model to follow clothing conditioning!")
+            
+            # CRITICAL FIX: Use proper guidance scale (7.5) instead of 1.0, and more sampling steps
+            samples_ddim, _ = sampler.sample(S=30, conditioning=c_encoded, batch_size=1, shape=shape, down_block_additional_residuals=down_block_additional_residuals, verbose=True, unconditional_guidance_scale=7.5, unconditional_conditioning=uc, eta=0.1, x_T=start_code, use_T_repaint=True, test_model_kwargs=test_model_kwargs, **test_model_kwargs)
             samples_ddim = 1/ 0.18215 * samples_ddim
             
             # Clear memory after sampling

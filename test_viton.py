@@ -37,8 +37,10 @@ import shutil
 import logging
 
 # Memory management settings
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:32"
 torch.cuda.empty_cache()
+if torch.cuda.is_available():
+    torch.cuda.set_per_process_memory_fraction(0.8, 0)
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
@@ -211,7 +213,7 @@ def run_human_parser(input_image_path, output_mask_path):
     except Exception as e:
         logging.warning(f"Cleanup failed: {e}")
 
-def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path, config_path, ckpt_path, ckpt_elbm_path, device, H=512, W=512):
+def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path, config_path, ckpt_path, ckpt_elbm_path, device, H=256, W=192):
     # Clear GPU memory before starting
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -237,7 +239,7 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
         torch.cuda.empty_cache()  # Clear memory after model loading
     model.eval()
     dataset = CPDataset(dataroot, H, mode='test', unpaired=True)
-    loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, pin_memory=True)
+    loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, pin_memory=False)
     vae_normalize  = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     clip_normalize = transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
     model.vae.decoder.blend_fusion = nn.ModuleList()
@@ -284,6 +286,9 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             feat_tensor = feat_tensor.cuda() if torch.cuda.is_available() else feat_tensor
             ref_tensor = ref_tensor.cuda() if torch.cuda.is_available() else ref_tensor
             uc = None
+            # Print memory summary before encoding
+            if torch.cuda.is_available():
+                print(torch.cuda.memory_summary())
             c_vae = model.encode_first_stage(vae_normalize(ref_tensor))
             c_vae = model.get_first_stage_encoding(c_vae).detach()
             c, patches = model.get_learned_conditioning(clip_normalize(ref_tensor))
@@ -315,6 +320,7 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             warp_feat = model.get_first_stage_encoding(warp_feat).detach()
             
             # Clear memory after encoding operations
+            del mask_tensor, inpaint_image, ref_tensor, feat_tensor, image_tensor, pose, sobel_img, parse_agnostic, warp_mask, new_mask, cm, c_vae, patches
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             ts = torch.full((1,), 999, device=device, dtype=torch.long)
@@ -324,6 +330,7 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             samples_ddim = 1/ 0.18215 * samples_ddim
             
             # Clear memory after sampling
+            del start_code, down_block_additional_residuals, warp_feat, c
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             _, intermediate_features = model.vae.encode(data["im_mask"].cuda() if torch.cuda.is_available() else data["im_mask"])
@@ -359,8 +366,8 @@ def main():
     parser.add_argument('--config', type=str, required=True)
     parser.add_argument('--ckpt', type=str, required=True)
     parser.add_argument('--ckpt_elbm_path', type=str, required=True)
-    parser.add_argument('--H', type=int, default=512)
-    parser.add_argument('--W', type=int, default=512)
+    parser.add_argument('--H', type=int, default=256)
+    parser.add_argument('--W', type=int, default=192)
     opt = parser.parse_args()
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     run_single_pair(opt.person_image, opt.cloth_image, opt.mask, opt.output, opt.config, opt.ckpt, opt.ckpt_elbm_path, device, H=opt.H, W=opt.W)

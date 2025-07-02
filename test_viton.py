@@ -502,6 +502,17 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             _, intermediate_features = model.vae.encode(im_mask_3ch)
             del im_mask_3ch  # Clean up
             intermediate_features = [intermediate_features[i] for i in int_layers]
+            
+            # Ensure emasc is on the same device as the main model
+            emasc_device = next(emasc.parameters()).device
+            if emasc_device != model_device:
+                print(f"DEBUG: Moving emasc from {emasc_device} to {model_device}")
+                emasc = emasc.to(model_device)
+                clear_gpu_memory()
+            
+            # Move intermediate features to the correct device
+            intermediate_features = [f.to(model_device) for f in intermediate_features]
+            
             processed_intermediate_features = emasc(intermediate_features)
             processed_intermediate_features = mask_features(processed_intermediate_features,(1- data["inpaint_mask"]).to(model_device))
             x_samples_ddim = model.vae.decode(samples_ddim, processed_intermediate_features, int_layers).sample

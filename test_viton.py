@@ -345,6 +345,22 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 parse_agnostic = data['parse_agnostic']
                 warp_mask = data['warp_mask']
                 new_mask = warp_mask
+                
+                # CRITICAL FIX: Ensure new_mask has correct channels for latent space
+                # The DDIM sampler needs new_mask to have 4 channels to match latent space
+                if new_mask.shape[1] == 3:  # If it's RGB (3 channels)
+                    # Convert to single channel by taking the mean
+                    new_mask_single = torch.mean(new_mask, dim=1, keepdim=True)
+                    # Expand to 4 channels for latent space compatibility  
+                    new_mask = new_mask_single.repeat(1, 4, 1, 1)
+                    print(f"DEBUG: Fixed new_mask channels from 3 to 4 for latent space compatibility")
+                elif new_mask.shape[1] == 1:  # If it's grayscale (1 channel)
+                    # Expand to 4 channels for latent space compatibility
+                    new_mask = new_mask.repeat(1, 4, 1, 1)
+                    print(f"DEBUG: Expanded new_mask from 1 to 4 channels for latent space compatibility")
+                
+                print(f"DEBUG: new_mask final shape: {new_mask.shape}")
+                
                 resize = transforms.Resize((H, int(H / 256 * 192)))
                 key = 'unpaired' if dataset.unpaired else 'paired'
                 cm = data['cloth_mask'][key]
@@ -404,20 +420,12 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                     # Fuse the features (this might need the fuse_adapter method)
                     if hasattr(model, 'fuse_adapter'):
                         try:
-                            # Reshape VAE features to match adapter expectations
                             print(f"DEBUG: c_vae shape before adapter: {c_vae.shape}")
                             print(f"DEBUG: patches shape before adapter: {patches.shape}")
                             
-                            # FIXED: Correct tensor reshaping for adapter fusion
-                            # The adapter expects: patches [B, N, D] and c_vae [B, H*W, C]
-                            B, C, H, W = c_vae.shape
-                            c_vae_reshaped = c_vae.permute(0, 2, 3, 1).reshape(B, H*W, C)  # [B, H*W, C]
-                            
-                            print(f"DEBUG: c_vae_reshaped shape: {c_vae_reshaped.shape}")
-                            print(f"DEBUG: Expected adapter input dimensions: patches={patches.shape}, c_vae_reshaped={c_vae_reshaped.shape}")
-                            
-                            # Try the adapter fusion with correct dimensions
-                            patches = model.fuse_adapter(patches, c_vae_reshaped)
+                            # FIXED: Use original 4D format - the adapter expects this format
+                            # Don't reshape c_vae, keep it as [B, C, H, W]
+                            patches = model.fuse_adapter(patches, c_vae)
                             print("DEBUG: Adapter fusion successful - clothing should now adapt to body shape!")
                         except Exception as e:
                             print(f"DEBUG: Adapter fusion failed: {e}")

@@ -353,6 +353,7 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             # Use a separate variable for the encoded version
             z_inpaint = model.encode_first_stage(inpaint_image)
             z_inpaint = model.get_first_stage_encoding(z_inpaint).detach()
+            test_model_kwargs['x_inpaint'] = z_inpaint
             # If you need to use z_inpaint downstream, pass it directly as a variable, not by overwriting the dictionary key
             test_model_kwargs['inpaint_mask'] = resize(test_model_kwargs['inpaint_mask'])
             warp_feat = model.encode_first_stage(feat_tensor)

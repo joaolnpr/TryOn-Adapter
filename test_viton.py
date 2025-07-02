@@ -212,7 +212,7 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
     test_id = "test_001"
     temp_dataset_dir = os.path.dirname(mask_path)  # Should be .../test/image-parse-v3/
     dataset_dir = os.path.dirname(os.path.dirname(temp_dataset_dir))  # .../test/
-    dataroot = os.path.dirname(dataset_dir)  # Parent of test/ directory
+    dataroot = os.getcwd()  # Use current working directory where test_pairs.txt is located
     
     print(f"Debug paths:")
     print(f"  mask_path: {mask_path}")

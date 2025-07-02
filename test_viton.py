@@ -340,9 +340,12 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                     else:
                         raise ValueError(f"Cannot match channel count: mask {m.shape}, sobel {s.shape}")
                 down_block_additional_residuals.append(torch.cat([m.unsqueeze(0), s.unsqueeze(0)], dim=0))
-            # Set required keys in test_model_kwargs
-            test_model_kwargs['inpaint_mask'] = mask_tensor
-            test_model_kwargs['inpaint_image'] = inpaint_image
+            # Resize inpaint_image and mask_tensor to match latent shape
+            latent_shape = feat_tensor.shape[-2:]
+            inpaint_image_resized = F.interpolate(inpaint_image, size=latent_shape, mode='bilinear', align_corners=False)
+            inpaint_mask_resized = F.interpolate(mask_tensor, size=latent_shape, mode='nearest')
+            test_model_kwargs['inpaint_mask'] = inpaint_mask_resized
+            test_model_kwargs['inpaint_image'] = inpaint_image_resized
             test_model_kwargs['warp_feat'] = feat_tensor
             test_model_kwargs['new_mask'] = new_mask
             # Check that all required keys are present in test_model_kwargs before use

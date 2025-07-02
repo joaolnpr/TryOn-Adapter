@@ -283,6 +283,21 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
     
     try:
         print("DEBUG: Creating dataset...")
+        # FIXED: Use the output directory structure created by the API provider
+        # The API provider creates: output_dir/test/ with proper subdirectories
+        # and output_dir/test_pairs.txt
+        potential_output_dir = os.path.dirname(output_path)
+        test_pairs_path = os.path.join(potential_output_dir, "test_pairs.txt")
+        
+        if os.path.exists(test_pairs_path):
+            # Use the structured dataset created by API provider
+            dataroot = potential_output_dir
+            print(f"DEBUG: Using structured dataset at {dataroot}")
+        else:
+            # Fallback to current directory (for command line usage)
+            dataroot = os.getcwd()
+            print(f"DEBUG: Using fallback dataroot at {dataroot}")
+        
         dataset = CPDataset(dataroot, H, mode='test', unpaired=True)
         print(f"DEBUG: Dataset created with {len(dataset)} samples")
         loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, pin_memory=False)
@@ -393,16 +408,9 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                             print(f"DEBUG: c_vae shape before adapter: {c_vae.shape}")
                             print(f"DEBUG: patches shape before adapter: {patches.shape}")
                             
-                            # The adapter expects flattened spatial features
-                            # Reshape c_vae from [B, C, H, W] to [B, H*W, C] if needed
-                            if len(c_vae.shape) == 4:
-                                B, C, H, W = c_vae.shape
-                                c_vae_reshaped = c_vae.permute(0, 2, 3, 1).reshape(B, H*W, C)
-                            else:
-                                c_vae_reshaped = c_vae
-                            
-                            print(f"DEBUG: c_vae_reshaped shape: {c_vae_reshaped.shape}")
-                            patches = model.fuse_adapter(patches, c_vae_reshaped)
+                            # FIXED: The adapter expects 4D tensor, not reshaped to 3D
+                            # Keep c_vae in its original 4D format [B, C, H, W]
+                            patches = model.fuse_adapter(patches, c_vae)
                             print("DEBUG: Adapter fusion successful")
                         except Exception as e:
                             print(f"DEBUG: Adapter fusion failed: {e}")
@@ -418,10 +426,10 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                     
                     # Clean up intermediate tensors
                     try:
-                        del c_vae_reshaped
+                        del c_vae
                     except:
                         pass
-                    del c_vae, c_clip, patches, c_proj, patches_proj
+                    del c_clip, patches, c_proj, patches_proj
                     clear_gpu_memory()
                 else:
                     # This might already be processed features
@@ -496,25 +504,63 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 # UNet needs: 0 = keep, 1 = replace
                 print(f"DEBUG: Original mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
                 
-                # INVERT the mask since CPDataset gives us the opposite of what UNet expects
-                if mask_single_channel.mean() > 0.5:  # If mask is mostly 1s, invert it
-                    print("DEBUG: Inverting mask - CPDataset mask was backwards!")
-                    mask_single_channel = 1.0 - mask_single_channel
-                    print(f"DEBUG: Inverted mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
-                
-                # Now ensure we have a reasonable torso inpainting area
-                if mask_single_channel.mean() < 0.05:  # If mask has very little inpainting area
-                    print("DEBUG: Creating focused torso inpainting mask...")
+                # IMPROVED: Better mask processing and handling
+                # If human parsing mask is empty/invalid, create a better synthetic mask
+                if mask_single_channel.mean() < 0.01 or mask_single_channel.max() < 0.1:
+                    print("DEBUG: Human parsing mask is invalid/empty, creating enhanced torso mask...")
                     B, C, H, W = mask_single_channel.shape
                     enhanced_mask = torch.zeros_like(mask_single_channel)
-                    # Create smaller, focused torso region mask (where clothing should be applied)
-                    torso_top = int(0.25 * H)      # Start lower 
-                    torso_bottom = int(0.65 * H)   # End higher
-                    torso_left = int(0.3 * W)      # More narrow
-                    torso_right = int(0.7 * W)     # More narrow
+                    
+                    # Create a much larger, more realistic torso region for clothing replacement
+                    # Cover shoulders, chest, and upper torso area
+                    torso_top = int(0.15 * H)      # Start from shoulders
+                    torso_bottom = int(0.75 * H)   # Extend to lower torso
+                    torso_left = int(0.20 * W)     # Wider coverage
+                    torso_right = int(0.80 * W)    # Wider coverage
+                    
+                    # Create the main torso region
                     enhanced_mask[:, :, torso_top:torso_bottom, torso_left:torso_right] = 1.0
+                    
+                    # Add smooth Gaussian blur to create soft edges and prevent harsh boundaries
+                    enhanced_mask = gauss(enhanced_mask)
+                    
+                    # Threshold to maintain binary mask but with soft edges
+                    enhanced_mask = (enhanced_mask > 0.3).float()
+                    
                     mask_single_channel = enhanced_mask
-                    print(f"DEBUG: Enhanced mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
+                    print(f"DEBUG: Enhanced synthetic mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
+                else:
+                    # We have a valid human parsing mask, process it properly
+                    print("DEBUG: Using human parsing mask...")
+                    
+                    # INVERT the mask since CPDataset gives us the opposite of what UNet expects
+                    if mask_single_channel.mean() > 0.5:  # If mask is mostly 1s, invert it
+                        print("DEBUG: Inverting mask - CPDataset mask was backwards!")
+                        mask_single_channel = 1.0 - mask_single_channel
+                        print(f"DEBUG: Inverted mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
+                    
+                    # Apply smooth edges to prevent artifacts
+                    mask_single_channel = gauss(mask_single_channel)
+                    # Keep the mask mostly binary but with soft boundaries
+                    mask_single_channel = (mask_single_channel > 0.1).float()
+                    
+                    # If the mask is still too small after processing, expand it
+                    if mask_single_channel.mean() < 0.15:
+                        print("DEBUG: Expanding small human parsing mask...")
+                        # Dilate the mask to make it larger
+                        import torch.nn.functional as F
+                        kernel = torch.ones(1, 1, 15, 15, device=mask_single_channel.device) / 225
+                        mask_single_channel = F.conv2d(mask_single_channel, kernel, padding=7)
+                        mask_single_channel = (mask_single_channel > 0.3).float()
+                        print(f"DEBUG: Expanded mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
+                
+                # Final check - ensure we have a reasonable mask area for clothing replacement
+                if mask_single_channel.mean() < 0.1:
+                    print("WARNING: Final mask area is still very small, this may cause poor results")
+                elif mask_single_channel.mean() > 0.9:
+                    print("WARNING: Final mask area covers almost entire image, this may cause artifacts")
+                else:
+                    print(f"DEBUG: Final mask covers {mask_single_channel.mean()*100:.1f}% of image - good for clothing replacement")
                 
                 mask_latent_resized = F.interpolate(mask_single_channel, size=latent_spatial_shape, mode='nearest')
                 

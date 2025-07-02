@@ -242,10 +242,6 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
     # Run the pipeline (reuse main logic, but for this dataset)
     config = OmegaConf.load(f"{config_path}")
     model = load_model_from_config(config, f"{ckpt_path}")
-    if torch.cuda.is_available():
-        model = model.cuda()
-        torch.cuda.empty_cache()  # Clear memory after model loading
-    model.eval()
     dataset = CPDataset(dataroot, H, mode='test', unpaired=True)
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, pin_memory=False)
     vae_normalize  = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))

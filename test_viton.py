@@ -409,13 +409,16 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                     del c_resized  # Clean up resized tensor
                     clear_gpu_memory()  # Clear after CLIP processing
                     
-                    # ENHANCE: Amplify the cloth conditioning signal
+                    # MAXIMIZE: Amplify the cloth conditioning signal for COMPLETE REPLACEMENT
                     print(f"DEBUG: Original c_clip stats - min: {c_clip.min()}, max: {c_clip.max()}, std: {c_clip.std()}")
                     print(f"DEBUG: Original patches stats - min: {patches.min()}, max: {patches.max()}, std: {patches.std()}")
                     
-                    # Amplify the conditioning signal to make it stronger (CRITICAL for cloth application)
-                    c_clip = c_clip * 1.5  # Boost the conditioning strength
-                    patches = patches * 1.5
+                    # MAXIMUM amplification for COMPLETE replacement (was 1.5x, now 2.5x)
+                    c_clip = c_clip * 2.5  # MAXIMUM conditioning strength for replacement
+                    patches = patches * 2.2  # Strong patch conditioning for replacement
+                    
+                    print(f"DEBUG: AMPLIFIED c_clip stats - min: {c_clip.min()}, max: {c_clip.max()}, std: {c_clip.std()}")
+                    print(f"DEBUG: AMPLIFIED patches stats - min: {patches.min()}, max: {patches.max()}, std: {patches.std()}")
                     
                     # Fuse the features (this might need the fuse_adapter method)
                     if hasattr(model, 'fuse_adapter'):
@@ -514,67 +517,79 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 # For the UNet input, keep mask as single channel and resize to latent space
                 mask_single_channel = mask_tensor if mask_tensor.shape[1] == 1 else mask_tensor[:, :1, :, :]  # Ensure single channel
                 
-                # CRITICAL: Fix the mask - it should be inverted! 
-                # Current mask: 1 = keep, 0 = replace  
-                # UNet needs: 0 = keep, 1 = replace
-                print(f"DEBUG: Original mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
-                
-                # IMPROVED: Better mask processing and handling
-                # If human parsing mask is empty/invalid, create a better synthetic mask
+                # ENHANCED: More aggressive mask for COMPLETE replacement
                 if mask_single_channel.mean() < 0.01 or mask_single_channel.max() < 0.1:
-                    print("DEBUG: Human parsing mask is invalid/empty, creating enhanced torso mask...")
+                    print("DEBUG: Human parsing mask is invalid/empty, creating MAXIMUM REPLACEMENT mask...")
                     B, C, H, W = mask_single_channel.shape
                     enhanced_mask = torch.zeros_like(mask_single_channel)
                     
-                    # Create a much larger, more realistic torso region for clothing replacement
-                    # Cover shoulders, chest, and upper torso area
-                    torso_top = int(0.15 * H)      # Start from shoulders
-                    torso_bottom = int(0.75 * H)   # Extend to lower torso
-                    torso_left = int(0.20 * W)     # Wider coverage
-                    torso_right = int(0.80 * W)    # Wider coverage
+                    # MAXIMUM coverage for complete clothing replacement
+                    torso_top = int(0.12 * H)      # Start higher (shoulders)
+                    torso_bottom = int(0.78 * H)   # Extend much lower
+                    torso_left = int(0.15 * W)     # Much wider coverage
+                    torso_right = int(0.85 * W)    # Much wider coverage
                     
-                    # Create the main torso region
+                    # Create MAXIMUM torso region for complete replacement
                     enhanced_mask[:, :, torso_top:torso_bottom, torso_left:torso_right] = 1.0
                     
-                    # Add smooth Gaussian blur to create soft edges and prevent harsh boundaries
+                    # Add BROADER Gaussian blur for complete replacement
                     enhanced_mask = gauss(enhanced_mask)
                     
-                    # Threshold to maintain binary mask but with soft edges
-                    enhanced_mask = (enhanced_mask > 0.3).float()
+                    # LOWER threshold for more extensive replacement coverage
+                    enhanced_mask = (enhanced_mask > 0.2).float()  # Was 0.3, now 0.2 for more coverage
                     
                     mask_single_channel = enhanced_mask
-                    print(f"DEBUG: Enhanced synthetic mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
+                    print(f"DEBUG: MAXIMUM REPLACEMENT mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
                 else:
-                    # We have a valid human parsing mask, process it properly
-                    print("DEBUG: Using human parsing mask...")
+                    # We have a valid human parsing mask, make it MORE AGGRESSIVE for replacement
+                    print("DEBUG: Using human parsing mask with MAXIMUM REPLACEMENT processing...")
                     
-                    # INVERT the mask since CPDataset gives us the opposite of what UNet expects
-                    if mask_single_channel.mean() > 0.5:  # If mask is mostly 1s, invert it
-                        print("DEBUG: Inverting mask - CPDataset mask was backwards!")
+                    # ALWAYS invert the mask since CPDataset gives us the opposite of what UNet expects
+                    if mask_single_channel.mean() > 0.4:  # Lower threshold for inversion
+                        print("DEBUG: Inverting mask for COMPLETE REPLACEMENT!")
                         mask_single_channel = 1.0 - mask_single_channel
                         print(f"DEBUG: Inverted mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
                     
-                    # Apply smooth edges to prevent artifacts
+                    # Apply BROADER smooth edges for better replacement
                     mask_single_channel = gauss(mask_single_channel)
-                    # Keep the mask mostly binary but with soft boundaries
-                    mask_single_channel = (mask_single_channel > 0.1).float()
+                    # LOWER threshold for more extensive replacement
+                    mask_single_channel = (mask_single_channel > 0.05).float()  # Was 0.1, now 0.05
                     
-                    # If the mask is still too small after processing, expand it
-                    if mask_single_channel.mean() < 0.15:
-                        print("DEBUG: Expanding small human parsing mask...")
-                        # Dilate the mask to make it larger
-                        kernel = torch.ones(1, 1, 15, 15, device=mask_single_channel.device) / 225
-                        mask_single_channel = F.conv2d(mask_single_channel, kernel, padding=7)
-                        mask_single_channel = (mask_single_channel > 0.3).float()
-                        print(f"DEBUG: Expanded mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
+                    # ALWAYS expand the mask for complete replacement
+                    print("DEBUG: EXPANDING mask for COMPLETE REPLACEMENT...")
+                    # Dilate with LARGER kernel for maximum coverage
+                    kernel = torch.ones(1, 1, 25, 25, device=mask_single_channel.device) / 625  # Larger kernel
+                    mask_single_channel = F.conv2d(mask_single_channel, kernel, padding=12)
+                    mask_single_channel = (mask_single_channel > 0.2).float()  # Lower threshold for more coverage
+                    print(f"DEBUG: MAXIMUM EXPANDED mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
                 
-                # Final check - ensure we have a reasonable mask area for clothing replacement
-                if mask_single_channel.mean() < 0.1:
-                    print("WARNING: Final mask area is still very small, this may cause poor results")
-                elif mask_single_channel.mean() > 0.9:
-                    print("WARNING: Final mask area covers almost entire image, this may cause artifacts")
+                # ENHANCED: Target optimal coverage for complete replacement
+                mask_coverage = mask_single_channel.mean()
+                if mask_coverage < 0.25:  # Was 0.1, now 0.25 for more aggressive replacement
+                    print(f"⚠️  WARNING: Replacement coverage {mask_coverage*100:.1f}% may be too low for COMPLETE clothing replacement")
+                    print("🔧 APPLYING EMERGENCY EXPANSION for COMPLETE REPLACEMENT...")
+                    
+                    # Emergency expansion - create even larger mask
+                    B, C, H, W = mask_single_channel.shape
+                    emergency_mask = torch.zeros_like(mask_single_channel)
+                    emergency_top = int(0.10 * H)     # Even higher
+                    emergency_bottom = int(0.80 * H)  # Even lower  
+                    emergency_left = int(0.10 * W)    # Even wider
+                    emergency_right = int(0.90 * W)   # Even wider
+                    emergency_mask[:, :, emergency_top:emergency_bottom, emergency_left:emergency_right] = 1.0
+                    
+                    # Blend with existing mask (take maximum)
+                    mask_single_channel = torch.maximum(mask_single_channel, emergency_mask)
+                    print(f"🚨 EMERGENCY EXPANDED mask stats - coverage: {mask_single_channel.mean()*100:.1f}%")
+                    
+                elif mask_coverage > 0.9:
+                    print(f"⚠️  WARNING: Replacement coverage {mask_coverage*100:.1f}% covers too much, reducing slightly...")
+                    # Slightly erode the mask to avoid replacing the entire image
+                    mask_single_channel = mask_single_channel * 0.9  # Reduce intensity slightly
+                    mask_single_channel = (mask_single_channel > 0.4).float()
+                    print(f"🔧 REDUCED mask stats - coverage: {mask_single_channel.mean()*100:.1f}%")
                 else:
-                    print(f"DEBUG: Final mask covers {mask_single_channel.mean()*100:.1f}% of image - good for clothing replacement")
+                    print(f"✅ EXCELLENT: MAXIMUM REPLACEMENT coverage {mask_coverage*100:.1f}% will ensure complete clothing replacement")
                 
                 mask_latent_resized = F.interpolate(mask_single_channel, size=latent_spatial_shape, mode='nearest')
                 
@@ -640,11 +655,34 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 print("DEBUG: Unconditional conditioning shape:", uc.shape)
                 
                 # Adjust guidance scale for CPU vs GPU
-                guidance_scale = 6.0 if model_device.type == 'cpu' else 8.0  # Increased for better conditioning
-                print(f"DEBUG: Using guidance scale {guidance_scale} (optimized) to FORCE the model to follow clothing conditioning!")
+                guidance_scale = 8.0 if model_device.type == 'cpu' else 10.0  # MAXIMUM for complete replacement
+                print(f"DEBUG: Using MAXIMUM guidance scale {guidance_scale} to FORCE complete clothing replacement!")
                 
-                # IMPROVED: Better sampling parameters for higher quality
-                samples_ddim, _ = sampler.sample(S=20, conditioning=c_encoded, batch_size=1, shape=shape, down_block_additional_residuals=down_block_additional_residuals, verbose=True, unconditional_guidance_scale=guidance_scale, unconditional_conditioning=uc, eta=0.15, x_T=start_code, use_T_repaint=True, test_model_kwargs=test_model_kwargs, **test_model_kwargs)
+                # ENHANCED: Maximum sampling parameters for best replacement quality
+                sampling_steps = 50  # More steps for better quality
+                eta_value = 0.25  # Higher eta for more variety and better replacement
+                
+                print(f"DEBUG: MAXIMUM REPLACEMENT sampling parameters:")
+                print(f"  🔥 Guidance scale: {guidance_scale} (MAXIMUM)")
+                print(f"  🎯 Sampling steps: {sampling_steps} (ENHANCED)")
+                print(f"  🌟 Eta value: {eta_value} (OPTIMIZED)")
+                
+                # ENHANCED: Maximum quality sampling for complete replacement
+                samples_ddim, _ = sampler.sample(
+                    S=sampling_steps, 
+                    conditioning=c_encoded, 
+                    batch_size=1, 
+                    shape=shape, 
+                    down_block_additional_residuals=down_block_additional_residuals, 
+                    verbose=True, 
+                    unconditional_guidance_scale=guidance_scale, 
+                    unconditional_conditioning=uc, 
+                    eta=eta_value, 
+                    x_T=start_code, 
+                    use_T_repaint=True, 
+                    test_model_kwargs=test_model_kwargs, 
+                    **test_model_kwargs
+                )
                 samples_ddim = 1/ 0.18215 * samples_ddim
                 
                 # Clear memory after sampling

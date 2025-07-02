@@ -495,11 +495,15 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             clear_gpu_memory()
             # Convert im_mask to 3 channels before encoding
             im_mask_3ch = convert_mask_to_3channel(data["im_mask"])
-            _, intermediate_features = model.vae.encode(im_mask_3ch.cuda() if torch.cuda.is_available() else im_mask_3ch)
+            # Move to the same device as the model (not just check if CUDA is available)
+            model_device = next(model.parameters()).device
+            print(f"DEBUG: Model is on device: {model_device}")
+            im_mask_3ch = im_mask_3ch.to(model_device)
+            _, intermediate_features = model.vae.encode(im_mask_3ch)
             del im_mask_3ch  # Clean up
             intermediate_features = [intermediate_features[i] for i in int_layers]
             processed_intermediate_features = emasc(intermediate_features)
-            processed_intermediate_features = mask_features(processed_intermediate_features,(1- data["inpaint_mask"]).cuda() if torch.cuda.is_available() else (1- data["inpaint_mask"]))
+            processed_intermediate_features = mask_features(processed_intermediate_features,(1- data["inpaint_mask"]).to(model_device))
             x_samples_ddim = model.vae.decode(samples_ddim, processed_intermediate_features, int_layers).sample
             x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
             x_samples_ddim = x_samples_ddim.cpu().permute(0, 2, 3, 1).numpy()

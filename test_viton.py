@@ -347,6 +347,12 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
             warp_feat = model.encode_first_stage(feat_tensor)
             warp_feat = model.get_first_stage_encoding(warp_feat).detach()
             
+            # Check that all required keys are present in test_model_kwargs before use
+            required_keys = ['inpaint_image', 'inpaint_mask', 'warp_feat', 'new_mask']
+            for k in required_keys:
+                if k not in test_model_kwargs:
+                    raise KeyError(f"Missing key '{k}' in test_model_kwargs. Current keys: {list(test_model_kwargs.keys())}")
+            
             # Clear memory after encoding operations
             del mask_tensor, inpaint_image, ref_tensor, feat_tensor, image_tensor, pose, sobel_img, parse_agnostic, warp_mask, new_mask, cm, c_vae, patches
             if torch.cuda.is_available():

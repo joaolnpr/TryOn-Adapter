@@ -185,70 +185,111 @@ def get_tensor_clip(normalize=True, toTensor=True):
 
 
 def run_human_parser(input_image_path, output_mask_path):
-    HOME = os.path.expanduser("~")
-    CIHP_PGN_DIR = os.path.join(HOME, "CIHP_PGN")
-    CHECKPOINT_DIR = os.path.join(HOME, "checkpoint")
-    DATASETS_DIR = os.path.join(HOME, "datasets")
-    OUTPUT_DIR = os.path.join(HOME, "output")
-
-    logging.info(f"Input image path: {input_image_path}")
-    logging.info(f"Output mask path: {output_mask_path}")
-    logging.info(f"CIHP_PGN_DIR: {CIHP_PGN_DIR}")
-    logging.info(f"CHECKPOINT_DIR: {CHECKPOINT_DIR}")
-    logging.info(f"DATASETS_DIR: {DATASETS_DIR}")
-    logging.info(f"OUTPUT_DIR: {OUTPUT_DIR}")
-
-    # Prepare input
-    os.makedirs(CHECKPOINT_DIR, exist_ok=True)
-    os.makedirs(DATASETS_DIR, exist_ok=True)
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    input_copy_path = os.path.join(DATASETS_DIR, "input.jpg")
+    """
+    Run human parsing using CIHP_PGN model
+    Returns True if successful, False otherwise
+    """
     try:
-        shutil.copy2(input_image_path, input_copy_path)
-        logging.info(f"Copied input image to {input_copy_path}")
-    except Exception as e:
-        logging.error(f"Failed to copy input image: {e}")
-        raise
-
-    # Use conda run to execute in the correct environment
-    command = [ "conda", "run", "-n", "cihp_pgn", "python", "test_pgn.py"
-    ]
-    logging.info(f"Running CIHP_PGN human parser in cihp_pgn environment with command: {' '.join(command)}")
-    result = subprocess.run(
-        command,
-        cwd=CIHP_PGN_DIR,
-        capture_output=True,
-        text=True
-    )
-    logging.info(f"STDOUT from parser:\n{result.stdout}")
-    if result.returncode != 0:
-        logging.error(f"STDERR from parser:\n{result.stderr}")
-        raise RuntimeError("CIHP_PGN parser failed!")
-
-    # The output mask will be in OUTPUT_DIR, named 'input.png'
-    mask_path = os.path.join(OUTPUT_DIR, "input.png")
-    logging.info(f"Looking for mask at {mask_path}")
-    if not os.path.exists(mask_path):
-        # List files in OUTPUT_DIR for debugging
-        logging.error(f"Mask not found at {mask_path}. Files in output dir: {os.listdir(OUTPUT_DIR)}")
-        raise FileNotFoundError(f"Parser did not create mask: {mask_path}")
-
-    # Copy mask to TryOn-Adapter temp dataset
-    os.makedirs(os.path.dirname(output_mask_path), exist_ok=True)
-    try:
-        shutil.copy2(mask_path, output_mask_path)
+        # Change to CIHP_PGN directory for imports
+        original_cwd = os.getcwd()
+        cihp_dir = os.path.join(os.path.dirname(__file__), "..", "CIHP_PGN")
+        os.chdir(cihp_dir)
+        
+        # Add CIHP_PGN to Python path
+        sys.path.insert(0, cihp_dir)
+        
+        logging.info(f"Input image path: {input_image_path}")
+        logging.info(f"Output mask path: {output_mask_path}")
+        
+        # Import after changing directory
+        from utils.pgn_keras import PGNKeras
+        import numpy as np
+        import cv2
+        
+        # Preprocess image
+        def preprocess_image(image_path, target_size=(512, 512)):
+            img = cv2.imread(image_path)
+            if img is None:
+                raise ValueError(f"Could not load image: {image_path}")
+            
+            # Convert BGR to RGB and swap to BGR for model compatibility
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img_b, img_g, img_r = img[:,:,2], img[:,:,1], img[:,:,0]
+            img = np.stack([img_b, img_g, img_r], axis=2)
+            
+            # Resize
+            img = cv2.resize(img, target_size)
+            
+            # Convert to float and normalize
+            img = img.astype(np.float32)
+            img -= np.array([125.0, 114.4, 107.9])  # IMG_MEAN
+            
+            # Add batch dimension
+            img = np.expand_dims(img, axis=0)
+            
+            return img
+        
+        # Load model
+        checkpoint_paths = [
+            '/home/paperspace/checkpoint/CIHP_pgn',
+            './checkpoint/CIHP_pgn'
+        ]
+        
+        checkpoint_path = None
+        for path in checkpoint_paths:
+            if os.path.exists(path):
+                checkpoint_path = path
+                break
+        
+        if not checkpoint_path:
+            raise FileNotFoundError("CIHP_PGN checkpoint not found in expected locations")
+        
+        logging.info(f"Loading model from: {checkpoint_path}")
+        model = PGNKeras(n_classes=20, checkpoint_path=checkpoint_path)
+        
+        # Preprocess image
+        image_batch = preprocess_image(input_image_path)
+        logging.info(f"[DEBUG] Input batch shape: {image_batch.shape}, dtype: {image_batch.dtype}")
+        
+        # Run inference
+        parsing_fc, parsing_rf_fc, edge_rf_fc = model(image_batch)
+        
+        # Process outputs
+        parsing_out = np.argmax(parsing_fc, axis=-1)
+        parsing_np = parsing_out.astype(np.uint8)[0]  # Remove batch dimension
+        
+        # Debug: Print mask stats
+        logging.info(f"[DEBUG] Mask unique values: {np.unique(parsing_np)}")
+        logging.info(f"[DEBUG] Mask shape: {parsing_np.shape}, dtype: {parsing_np.dtype}")
+        
+        # Create output directory
+        OUTPUT_DIR = os.path.dirname(output_mask_path)
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        
+        # Save grayscale mask
+        cv2.imwrite(output_mask_path, parsing_np)
         logging.info(f"Mask created and copied to: {output_mask_path}")
+        
+        # Save colorized mask for debugging
+        try:
+            from utils.utils import decode_labels
+            color_mask = decode_labels(parsing_np[np.newaxis, ..., np.newaxis], num_images=1, num_classes=20)[0]
+            color_output_path = output_mask_path.replace('.png', '_color.png')
+            cv2.imwrite(color_output_path, color_mask)
+            logging.info(f"[DEBUG] Colorized mask saved to: {color_output_path}")
+        except Exception as e:
+            logging.warning(f"Could not save colorized mask: {e}")
+        
+        return True
+        
     except Exception as e:
-        logging.error(f"Failed to copy mask: {e}")
-        raise
-
-    # Clean up (optional)
-    try:
-        os.remove(input_copy_path)
-        os.remove(mask_path)
-        logging.info("Temporary files cleaned up.")
-    except Exception as e:
-        logging.warning(f"Cleanup failed: {e}")
+        logging.error(f"Human parsing failed: {e}")
+        return False
+    finally:
+        # Restore original working directory and clean up path
+        os.chdir(original_cwd)
+        if cihp_dir in sys.path:
+            sys.path.remove(cihp_dir)
 
 def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path, config_path, ckpt_path, ckpt_elbm_path, device, H=256, W=192):
     try:

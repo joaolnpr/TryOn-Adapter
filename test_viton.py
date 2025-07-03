@@ -438,10 +438,37 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                         print(f"DEBUG: c_vae shape before adapter: {c_vae.shape}")
                         print(f"DEBUG: patches shape before adapter: {patches.shape}")
                         
-                        # FIXED: Use original 4D format - the adapter expects this format
-                        # Don't reshape c_vae, keep it as [B, C, H, W]
-                        patches = model.fuse_adapter(patches, c_vae)
-                        print("DEBUG: Adapter fusion successful - clothing should now adapt to body shape!")
+                        # IMPROVED: Adapter fusion with proper shape handling
+                        # The adapter expects specific input dimensions
+                        original_c_vae_shape = c_vae.shape
+                        original_patches_shape = patches.shape
+                        
+                        # Ensure c_vae is in correct format [B, C, H, W]
+                        if c_vae.dim() == 2:  # [B, Features] -> need to reshape
+                            # Calculate spatial dimensions from feature count
+                            B, total_features = c_vae.shape
+                            # Common VAE latent dimensions
+                            spatial_size = int((total_features // 4) ** 0.5)
+                            if spatial_size * spatial_size * 4 == total_features:
+                                c_vae = c_vae.view(B, 4, spatial_size, spatial_size)
+                                print(f"DEBUG: Reshaped c_vae from {original_c_vae_shape} to {c_vae.shape}")
+                        
+                        # Ensure patches is in correct format [B, Tokens, Features]
+                        if patches.dim() == 2:  # [B*Tokens, Features] -> [B, Tokens, Features]
+                            B = 1  # We know batch size is 1
+                            tokens = patches.shape[0] // B
+                            features = patches.shape[1]
+                            patches = patches.view(B, tokens, features)
+                            print(f"DEBUG: Reshaped patches from {original_patches_shape} to {patches.shape}")
+                        
+                        # Verify dimensions are compatible before fusion
+                        if c_vae.dim() == 4 and patches.dim() == 3:
+                            print(f"DEBUG: Final shapes - c_vae: {c_vae.shape}, patches: {patches.shape}")
+                            patches = model.fuse_adapter(patches, c_vae)
+                            print("DEBUG: ✅ Adapter fusion successful - clothing should now adapt to body shape!")
+                        else:
+                            print(f"DEBUG: Shape mismatch - c_vae.dim()={c_vae.dim()}, patches.dim()={patches.dim()}")
+                            print("DEBUG: Skipping adapter fusion due to incompatible shapes...")
                     except Exception as e:
                         print(f"DEBUG: Adapter fusion failed: {e}")
                         print("DEBUG: Continuing without adapter fusion...")
@@ -508,15 +535,26 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 # Clear memory before encoding
                 clear_gpu_memory()
                 
-                # Encode inpaint_image to latent space
-                z_inpaint = model.encode_first_stage(inpaint_image)
-                z_inpaint = model.get_first_stage_encoding(z_inpaint).detach()
+                # IMPROVED: Use smaller batch processing to avoid OOM
+                torch.backends.cudnn.benchmark = False  # Disable for memory efficiency
+                
+                # Set memory management
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    # Set conservative memory split
+                    os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:32'
+                
+                # Encode inpaint_image to latent space with memory management
+                with torch.no_grad():  # Ensure no gradients
+                    z_inpaint = model.encode_first_stage(inpaint_image)
+                    z_inpaint = model.get_first_stage_encoding(z_inpaint).detach()
                 
                 clear_gpu_memory()  # Clear memory after encoding inpaint_image
                 
-                # Encode feat_tensor to get the proper latent dimensions
-                warp_feat_encoded = model.encode_first_stage(feat_tensor)
-                warp_feat_encoded = model.get_first_stage_encoding(warp_feat_encoded).detach()
+                # Encode feat_tensor to get the proper latent dimensions with memory management
+                with torch.no_grad():  # Ensure no gradients
+                    warp_feat_encoded = model.encode_first_stage(feat_tensor)
+                    warp_feat_encoded = model.get_first_stage_encoding(warp_feat_encoded).detach()
                 
                 # Use the encoded warp_feat shape for proper latent space dimensions
                 latent_spatial_shape = warp_feat_encoded.shape[-2:]
@@ -525,8 +563,16 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 # For the UNet input, keep mask as single channel and resize to latent space
                 mask_single_channel = mask_tensor if mask_tensor.shape[1] == 1 else mask_tensor[:, :1, :, :]  # Ensure single channel
                 
-                # OPTIMIZED: Simplified mask processing for faster inference
-                if mask_single_channel.mean() < 0.01 or mask_single_channel.max() < 0.1:
+                # OPTIMIZED: More permissive mask validation for CIHP_PGN compatibility
+                mask_mean = mask_single_channel.mean()
+                mask_max = mask_single_channel.max()
+                mask_nonzero = (mask_single_channel > 0).float().mean()
+                
+                print(f"DEBUG: Mask validation - mean: {mask_mean:.4f}, max: {mask_max:.4f}, nonzero: {mask_nonzero:.4f}")
+                
+                # IMPROVED: More permissive validation for CIHP_PGN masks
+                # CIHP_PGN produces segmentation masks with values 0-19 (normalized to 0-1)
+                if mask_nonzero < 0.001 or mask_max < 0.02:  # Much more permissive
                     print("DEBUG: Human parsing mask is invalid/empty, creating SIMPLE REPLACEMENT mask...")
                     B, C, H, W = mask_single_channel.shape
                     enhanced_mask = torch.zeros_like(mask_single_channel)
@@ -547,24 +593,57 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                     mask_single_channel = enhanced_mask
                     print(f"DEBUG: SIMPLE REPLACEMENT mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
                 else:
-                    # We have a valid human parsing mask, use SIMPLIFIED processing
-                    print("DEBUG: Using human parsing mask with SIMPLIFIED processing...")
+                    # We have a valid human parsing mask, use IMPROVED processing
+                    print("DEBUG: Using VALID human parsing mask with improved processing...")
                     
-                    # Simple inversion if needed
-                    if mask_single_channel.mean() > 0.5:
-                        print("DEBUG: Inverting mask for replacement!")
+                    # IMPROVED: Better handling of CIHP_PGN masks
+                    # Normalize mask values to 0-1 range if needed
+                    if mask_max > 1.0:
+                        print("DEBUG: Normalizing mask values to 0-1 range")
+                        mask_single_channel = mask_single_channel / mask_max
+                    
+                    # IMPROVED: Focus on torso/upper body regions (classes 5,6,7 in CIHP_PGN)
+                    # If the mask has multiple classes, focus on clothing areas
+                    unique_values = torch.unique(mask_single_channel)
+                    print(f"DEBUG: Mask unique values: {unique_values}")
+                    
+                    if len(unique_values) > 2:  # Multi-class segmentation
+                        print("DEBUG: Processing multi-class segmentation mask...")
+                        # Focus on upper body clothing regions
+                        clothing_mask = torch.zeros_like(mask_single_channel)
+                        
+                        # CIHP_PGN classes: 5=Upper-clothes, 6=Dress, 7=Coat, 4=Jumpsuits
+                        clothing_classes = [4/19, 5/19, 6/19, 7/19]  # Normalized values
+                        for class_val in clothing_classes:
+                            tolerance = 0.02
+                            class_pixels = torch.abs(mask_single_channel - class_val) < tolerance
+                            clothing_mask[class_pixels] = 1.0
+                        
+                        if clothing_mask.sum() > 0:
+                            mask_single_channel = clothing_mask
+                            print(f"DEBUG: Extracted clothing regions: {clothing_mask.sum()} pixels")
+                        else:
+                            print("DEBUG: No clothing classes found, using all non-background")
+                            mask_single_channel = (mask_single_channel > 0.02).float()
+                    else:
+                        print("DEBUG: Processing binary mask...")
+                        mask_single_channel = (mask_single_channel > 0.02).float()
+                    
+                    # Simple inversion check - if most of the image is masked, invert
+                    if mask_single_channel.mean() > 0.7:
+                        print("DEBUG: Inverting mask - most of image was masked!")
                         mask_single_channel = 1.0 - mask_single_channel
                     
                     # Simple smoothing
                     mask_single_channel = gauss(mask_single_channel)
                     mask_single_channel = (mask_single_channel > 0.1).float()
                     
-                    # Simple expansion with smaller kernel
-                    print("DEBUG: Simple mask expansion...")
-                    kernel = torch.ones(1, 1, 15, 15, device=mask_single_channel.device) / 225  # Smaller kernel
-                    mask_single_channel = F.conv2d(mask_single_channel, kernel, padding=7)
-                    mask_single_channel = (mask_single_channel > 0.3).float()
-                    print(f"DEBUG: SIMPLIFIED mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
+                    # IMPROVED: Moderate expansion with clothing-aware kernel
+                    print("DEBUG: Applying clothing-aware mask expansion...")
+                    kernel = torch.ones(1, 1, 11, 11, device=mask_single_channel.device) / 121  # Smaller, more precise
+                    mask_single_channel = F.conv2d(mask_single_channel, kernel, padding=5)
+                    mask_single_channel = (mask_single_channel > 0.2).float()
+                    print(f"DEBUG: IMPROVED mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
                 
                 # OPTIMIZED: Simple coverage check for faster processing
                 mask_coverage = mask_single_channel.mean()

@@ -321,6 +321,8 @@ def run_human_parser(input_image_path, output_mask_path):
             sys.path.remove(cihp_dir)
 
 def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path, config_path, ckpt_path, ckpt_elbm_path, device, H=256, W=192):
+    # Ensure functional API is available throughout this function
+    import torch.nn.functional as F
     try:
         print("DEBUG: Starting run_single_pair function...")
         
@@ -512,7 +514,6 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                         # The adapter expects specific input dimensions
                         TARGET_HW = (28, 28)  # (H, W) expected by Embedding_Adapter
                         if c_vae.dim() == 4 and c_vae.shape[-2:] != TARGET_HW:
-                            import torch.nn.functional as F
                             c_vae = F.adaptive_avg_pool2d(c_vae, TARGET_HW)
                             print(f"DEBUG: Pooled c_vae to {TARGET_HW} for adapter compatibility")
                         original_c_vae_shape = c_vae.shape

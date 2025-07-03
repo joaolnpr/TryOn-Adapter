@@ -529,79 +529,72 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 # For the UNet input, keep mask as single channel and resize to latent space
                 mask_single_channel = mask_tensor if mask_tensor.shape[1] == 1 else mask_tensor[:, :1, :, :]  # Ensure single channel
                 
-                # ENHANCED: More aggressive mask for COMPLETE replacement
+                # OPTIMIZED: Simplified mask processing for faster inference
                 if mask_single_channel.mean() < 0.01 or mask_single_channel.max() < 0.1:
-                    print("DEBUG: Human parsing mask is invalid/empty, creating MAXIMUM REPLACEMENT mask...")
+                    print("DEBUG: Human parsing mask is invalid/empty, creating SIMPLE REPLACEMENT mask...")
                     B, C, H, W = mask_single_channel.shape
                     enhanced_mask = torch.zeros_like(mask_single_channel)
                     
-                    # MAXIMUM coverage for complete clothing replacement
-                    torso_top = int(0.12 * H)      # Start higher (shoulders)
-                    torso_bottom = int(0.78 * H)   # Extend much lower
-                    torso_left = int(0.15 * W)     # Much wider coverage
-                    torso_right = int(0.85 * W)    # Much wider coverage
+                    # SIMPLE coverage for faster processing
+                    torso_top = int(0.15 * H)      # Standard coverage
+                    torso_bottom = int(0.75 * H)   # Standard coverage
+                    torso_left = int(0.20 * W)     # Standard coverage
+                    torso_right = int(0.80 * W)    # Standard coverage
                     
-                    # Create MAXIMUM torso region for complete replacement
+                    # Create simple torso region
                     enhanced_mask[:, :, torso_top:torso_bottom, torso_left:torso_right] = 1.0
                     
-                    # Add BROADER Gaussian blur for complete replacement
+                    # Simple Gaussian blur
                     enhanced_mask = gauss(enhanced_mask)
-                    
-                    # LOWER threshold for more extensive replacement coverage
-                    enhanced_mask = (enhanced_mask > 0.2).float()  # Was 0.3, now 0.2 for more coverage
+                    enhanced_mask = (enhanced_mask > 0.3).float()
                     
                     mask_single_channel = enhanced_mask
-                    print(f"DEBUG: MAXIMUM REPLACEMENT mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
+                    print(f"DEBUG: SIMPLE REPLACEMENT mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
                 else:
-                    # We have a valid human parsing mask, make it MORE AGGRESSIVE for replacement
-                    print("DEBUG: Using human parsing mask with MAXIMUM REPLACEMENT processing...")
+                    # We have a valid human parsing mask, use SIMPLIFIED processing
+                    print("DEBUG: Using human parsing mask with SIMPLIFIED processing...")
                     
-                    # ALWAYS invert the mask since CPDataset gives us the opposite of what UNet expects
-                    if mask_single_channel.mean() > 0.4:  # Lower threshold for inversion
-                        print("DEBUG: Inverting mask for COMPLETE REPLACEMENT!")
+                    # Simple inversion if needed
+                    if mask_single_channel.mean() > 0.5:
+                        print("DEBUG: Inverting mask for replacement!")
                         mask_single_channel = 1.0 - mask_single_channel
-                        print(f"DEBUG: Inverted mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
                     
-                    # Apply BROADER smooth edges for better replacement
+                    # Simple smoothing
                     mask_single_channel = gauss(mask_single_channel)
-                    # LOWER threshold for more extensive replacement
-                    mask_single_channel = (mask_single_channel > 0.05).float()  # Was 0.1, now 0.05
+                    mask_single_channel = (mask_single_channel > 0.1).float()
                     
-                    # ALWAYS expand the mask for complete replacement
-                    print("DEBUG: EXPANDING mask for COMPLETE REPLACEMENT...")
-                    # Dilate with LARGER kernel for maximum coverage
-                    kernel = torch.ones(1, 1, 25, 25, device=mask_single_channel.device) / 625  # Larger kernel
-                    mask_single_channel = F.conv2d(mask_single_channel, kernel, padding=12)
-                    mask_single_channel = (mask_single_channel > 0.2).float()  # Lower threshold for more coverage
-                    print(f"DEBUG: MAXIMUM EXPANDED mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
+                    # Simple expansion with smaller kernel
+                    print("DEBUG: Simple mask expansion...")
+                    kernel = torch.ones(1, 1, 15, 15, device=mask_single_channel.device) / 225  # Smaller kernel
+                    mask_single_channel = F.conv2d(mask_single_channel, kernel, padding=7)
+                    mask_single_channel = (mask_single_channel > 0.3).float()
+                    print(f"DEBUG: SIMPLIFIED mask stats - min: {mask_single_channel.min()}, max: {mask_single_channel.max()}, mean: {mask_single_channel.mean()}")
                 
-                # ENHANCED: Target optimal coverage for complete replacement
+                # OPTIMIZED: Simple coverage check for faster processing
                 mask_coverage = mask_single_channel.mean()
-                if mask_coverage < 0.25:  # Was 0.1, now 0.25 for more aggressive replacement
-                    print(f"⚠️  WARNING: Replacement coverage {mask_coverage*100:.1f}% may be too low for COMPLETE clothing replacement")
-                    print("🔧 APPLYING EMERGENCY EXPANSION for COMPLETE REPLACEMENT...")
+                if mask_coverage < 0.15:  # Simple threshold
+                    print(f"⚠️  WARNING: Low coverage {mask_coverage*100:.1f}%, applying simple expansion...")
                     
-                    # Emergency expansion - create even larger mask
+                    # Simple expansion
                     B, C, H, W = mask_single_channel.shape
-                    emergency_mask = torch.zeros_like(mask_single_channel)
-                    emergency_top = int(0.10 * H)     # Even higher
-                    emergency_bottom = int(0.80 * H)  # Even lower  
-                    emergency_left = int(0.10 * W)    # Even wider
-                    emergency_right = int(0.90 * W)   # Even wider
-                    emergency_mask[:, :, emergency_top:emergency_bottom, emergency_left:emergency_right] = 1.0
+                    simple_mask = torch.zeros_like(mask_single_channel)
+                    simple_top = int(0.15 * H)
+                    simple_bottom = int(0.75 * H)
+                    simple_left = int(0.20 * W)
+                    simple_right = int(0.80 * W)
+                    simple_mask[:, :, simple_top:simple_bottom, simple_left:simple_right] = 1.0
                     
-                    # Blend with existing mask (take maximum)
-                    mask_single_channel = torch.maximum(mask_single_channel, emergency_mask)
-                    print(f"🚨 EMERGENCY EXPANDED mask stats - coverage: {mask_single_channel.mean()*100:.1f}%")
+                    # Blend with existing mask
+                    mask_single_channel = torch.maximum(mask_single_channel, simple_mask)
+                    print(f"🔧 SIMPLE EXPANSION - coverage: {mask_single_channel.mean()*100:.1f}%")
                     
-                elif mask_coverage > 0.9:
-                    print(f"⚠️  WARNING: Replacement coverage {mask_coverage*100:.1f}% covers too much, reducing slightly...")
-                    # Slightly erode the mask to avoid replacing the entire image
-                    mask_single_channel = mask_single_channel * 0.9  # Reduce intensity slightly
-                    mask_single_channel = (mask_single_channel > 0.4).float()
-                    print(f"🔧 REDUCED mask stats - coverage: {mask_single_channel.mean()*100:.1f}%")
+                elif mask_coverage > 0.8:
+                    print(f"⚠️  WARNING: High coverage {mask_coverage*100:.1f}%, reducing...")
+                    mask_single_channel = mask_single_channel * 0.8
+                    mask_single_channel = (mask_single_channel > 0.3).float()
+                    print(f"🔧 REDUCED - coverage: {mask_single_channel.mean()*100:.1f}%")
                 else:
-                    print(f"✅ EXCELLENT: MAXIMUM REPLACEMENT coverage {mask_coverage*100:.1f}% will ensure complete clothing replacement")
+                    print(f"✅ GOOD: Coverage {mask_coverage*100:.1f}% is acceptable")
                 
                 mask_latent_resized = F.interpolate(mask_single_channel, size=latent_spatial_shape, mode='nearest')
                 

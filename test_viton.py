@@ -37,10 +37,15 @@ import shutil
 import logging
 
 # Memory management settings
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 torch.cuda.empty_cache()
 if torch.cuda.is_available():
-    torch.cuda.set_per_process_memory_fraction(0.7, 0)
+    torch.cuda.set_per_process_memory_fraction(0.8, 0)
+    # Enable memory efficient attention if available
+    try:
+        torch.backends.cuda.enable_flash_sdp(True)
+    except:
+        pass
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
@@ -116,14 +121,21 @@ def load_model_from_config(config, ckpt, verbose=False):
             # Clear memory before loading to GPU
             clear_gpu_memory()
             model = model.cuda()
-            # Use mixed precision more carefully
+            # Use half precision more aggressively for speed
             try:
-                if hasattr(model, 'diffusion_model'):
-                    model.diffusion_model = model.diffusion_model.half()
-                if hasattr(model, 'first_stage_model'):
-                    model.first_stage_model = model.first_stage_model.half()
+                model = model.half()  # Convert entire model to half precision
+                print("DEBUG: Model converted to half precision for faster inference")
             except RuntimeError as e:
-                print(f"Half precision failed: {e}, keeping float32")
+                print(f"Full half precision failed: {e}, trying partial conversion")
+                try:
+                    if hasattr(model, 'diffusion_model'):
+                        model.diffusion_model = model.diffusion_model.half()
+                    if hasattr(model, 'first_stage_model'):
+                        model.first_stage_model = model.first_stage_model.half()
+                    if hasattr(model, 'cond_stage_model'):
+                        model.cond_stage_model = model.cond_stage_model.half()
+                except RuntimeError as e2:
+                    print(f"Partial half precision failed: {e2}, keeping float32")
     except RuntimeError as e:
         print(f"CUDA OOM: {e}\nFalling back to CPU.")
         model = model.cpu()
@@ -409,16 +421,16 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                     del c_resized  # Clean up resized tensor
                     clear_gpu_memory()  # Clear after CLIP processing
                     
-                    # MAXIMIZE: Amplify the cloth conditioning signal for COMPLETE REPLACEMENT
-                    print(f"DEBUG: Original c_clip stats - min: {c_clip.min()}, max: {c_clip.max()}, std: {c_clip.std()}")
-                    print(f"DEBUG: Original patches stats - min: {patches.min()}, max: {patches.max()}, std: {patches.std()}")
-                    
-                    # MAXIMUM amplification for COMPLETE replacement (was 1.5x, now 2.5x)
-                    c_clip = c_clip * 2.5  # MAXIMUM conditioning strength for replacement
-                    patches = patches * 2.2  # Strong patch conditioning for replacement
-                    
-                    print(f"DEBUG: AMPLIFIED c_clip stats - min: {c_clip.min()}, max: {c_clip.max()}, std: {c_clip.std()}")
-                    print(f"DEBUG: AMPLIFIED patches stats - min: {patches.min()}, max: {patches.max()}, std: {patches.std()}")
+                                    # OPTIMIZED: Moderate amplification for faster convergence
+                print(f"DEBUG: Original c_clip stats - min: {c_clip.min()}, max: {c_clip.max()}, std: {c_clip.std()}")
+                print(f"DEBUG: Original patches stats - min: {patches.min()}, max: {patches.max()}, std: {patches.std()}")
+                
+                # OPTIMIZED amplification for faster convergence
+                c_clip = c_clip * 1.8  # Reduced from 2.5x for speed
+                patches = patches * 1.5  # Reduced from 2.2x for speed
+                
+                print(f"DEBUG: OPTIMIZED c_clip stats - min: {c_clip.min()}, max: {c_clip.max()}, std: {c_clip.std()}")
+                print(f"DEBUG: OPTIMIZED patches stats - min: {patches.min()}, max: {patches.max()}, std: {patches.std()}")
                     
                     # Fuse the features (this might need the fuse_adapter method)
                     if hasattr(model, 'fuse_adapter'):
@@ -654,20 +666,23 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 print("DEBUG: Cloth conditioning shape:", c_encoded.shape)
                 print("DEBUG: Unconditional conditioning shape:", uc.shape)
                 
-                # Adjust guidance scale for CPU vs GPU
-                guidance_scale = 8.0 if model_device.type == 'cpu' else 10.0  # MAXIMUM for complete replacement
-                print(f"DEBUG: Using MAXIMUM guidance scale {guidance_scale} to FORCE complete clothing replacement!")
+                # OPTIMIZED: Faster inference with balanced quality
+                guidance_scale = 5.0 if model_device.type == 'cpu' else 7.0  # Reduced for speed
+                print(f"DEBUG: Using OPTIMIZED guidance scale {guidance_scale} for faster inference!")
                 
-                # ENHANCED: Maximum sampling parameters for best replacement quality
-                sampling_steps = 50  # More steps for better quality
-                eta_value = 0.25  # Higher eta for more variety and better replacement
+                # OPTIMIZED: Faster sampling parameters for reasonable quality
+                sampling_steps = 20  # Reduced from 50 for speed
+                eta_value = 0.0  # Deterministic for faster convergence
                 
-                print(f"DEBUG: MAXIMUM REPLACEMENT sampling parameters:")
-                print(f"  🔥 Guidance scale: {guidance_scale} (MAXIMUM)")
-                print(f"  🎯 Sampling steps: {sampling_steps} (ENHANCED)")
-                print(f"  🌟 Eta value: {eta_value} (OPTIMIZED)")
+                print(f"DEBUG: OPTIMIZED sampling parameters:")
+                print(f"  ⚡ Guidance scale: {guidance_scale} (OPTIMIZED)")
+                print(f"  🎯 Sampling steps: {sampling_steps} (FAST)")
+                print(f"  🌟 Eta value: {eta_value} (DETERMINISTIC)")
                 
-                # ENHANCED: Maximum quality sampling for complete replacement
+                # OPTIMIZED: Fast sampling for reasonable quality
+                print(f"🚀 Starting diffusion sampling with {sampling_steps} steps...")
+                start_time = time.time()
+                
                 samples_ddim, _ = sampler.sample(
                     S=sampling_steps, 
                     conditioning=c_encoded, 
@@ -683,6 +698,9 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                     test_model_kwargs=test_model_kwargs, 
                     **test_model_kwargs
                 )
+                
+                sampling_time = time.time() - start_time
+                print(f"✅ Sampling completed in {sampling_time:.2f} seconds")
                 samples_ddim = 1/ 0.18215 * samples_ddim
                 
                 # Clear memory after sampling

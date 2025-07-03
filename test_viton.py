@@ -49,6 +49,35 @@ if torch.cuda.is_available():
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
+# -----------------------------------------------------------------------------
+# HOTFIX: Keras-3 removed backend.is_tensor and backend.is_keras_tensor which
+# older versions of einops expect.  This shim re-adds no-op implementations so
+# einops' Keras backend no longer crashes during backend detection.
+# -----------------------------------------------------------------------------
+try:
+    import keras
+    import types
+    kb = getattr(keras, 'backend', None)
+    if kb is None:
+        # In Keras-3 the backend submodule is generated lazily; create placeholder
+        kb = types.ModuleType('backend')
+        keras.backend = kb  # type: ignore
+        import sys
+        sys.modules['keras.backend'] = kb
+    # Add missing attributes if necessary
+    if not hasattr(kb, 'is_tensor'):
+        kb.is_tensor = lambda x: False  # type: ignore
+    if not hasattr(kb, 'is_keras_tensor'):
+        kb.is_keras_tensor = lambda x: False  # type: ignore
+    # Expose same helpers at top module level (einops also asks keras.*)
+    if not hasattr(keras, 'is_tensor'):
+        keras.is_tensor = kb.is_tensor  # type: ignore
+    if not hasattr(keras, 'is_keras_tensor'):
+        keras.is_keras_tensor = kb.is_keras_tensor  # type: ignore
+except Exception:
+    # If keras is not installed nothing to patch.
+    pass
+
 def load_checkpoint(model, checkpoint_path):
     if not os.path.exists(checkpoint_path):
         raise ValueError("'{}' is not a valid checkpoint path".format(checkpoint_path))

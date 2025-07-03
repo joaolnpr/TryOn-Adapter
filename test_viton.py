@@ -431,40 +431,36 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 
                 print(f"DEBUG: OPTIMIZED c_clip stats - min: {c_clip.min()}, max: {c_clip.max()}, std: {c_clip.std()}")
                 print(f"DEBUG: OPTIMIZED patches stats - min: {patches.min()}, max: {patches.max()}, std: {patches.std()}")
-                    
-                    # Fuse the features (this might need the fuse_adapter method)
-                    if hasattr(model, 'fuse_adapter'):
-                        try:
-                            print(f"DEBUG: c_vae shape before adapter: {c_vae.shape}")
-                            print(f"DEBUG: patches shape before adapter: {patches.shape}")
-                            
-                            # FIXED: Use original 4D format - the adapter expects this format
-                            # Don't reshape c_vae, keep it as [B, C, H, W]
-                            patches = model.fuse_adapter(patches, c_vae)
-                            print("DEBUG: Adapter fusion successful - clothing should now adapt to body shape!")
-                        except Exception as e:
-                            print(f"DEBUG: Adapter fusion failed: {e}")
-                            print("DEBUG: Continuing without adapter fusion...")
-                            # Continue without fusion if it fails
-                    
-                    # Project the features
-                    c_proj = model.proj_out(c_clip)
-                    patches_proj = model.proj_out_patches(patches)
-                    
-                    # Concatenate the projected features
-                    c_encoded = torch.cat([c_proj, patches_proj], dim=1)
-                    
-                    # Clean up intermediate tensors
+                
+                # Fuse the features (this might need the fuse_adapter method)
+                if hasattr(model, 'fuse_adapter'):
                     try:
-                        del c_vae
-                    except:
-                        pass
-                    del c_clip, patches, c_proj, patches_proj
-                    clear_gpu_memory()
-                else:
-                    # This might already be processed features
-                    print("DEBUG: Cloth appears to be processed features, using as-is...")
-                    c_encoded = c
+                        print(f"DEBUG: c_vae shape before adapter: {c_vae.shape}")
+                        print(f"DEBUG: patches shape before adapter: {patches.shape}")
+                        
+                        # FIXED: Use original 4D format - the adapter expects this format
+                        # Don't reshape c_vae, keep it as [B, C, H, W]
+                        patches = model.fuse_adapter(patches, c_vae)
+                        print("DEBUG: Adapter fusion successful - clothing should now adapt to body shape!")
+                    except Exception as e:
+                        print(f"DEBUG: Adapter fusion failed: {e}")
+                        print("DEBUG: Continuing without adapter fusion...")
+                        # Continue without fusion if it fails
+                
+                # Project the features
+                c_proj = model.proj_out(c_clip)
+                patches_proj = model.proj_out_patches(patches)
+                
+                # Concatenate the projected features
+                c_encoded = torch.cat([c_proj, patches_proj], dim=1)
+                
+                # Clean up intermediate tensors
+                try:
+                    del c_vae
+                except:
+                    pass
+                del c_clip, patches, c_proj, patches_proj
+                clear_gpu_memory()
 
                 # Prepare ref_tensor_half for VAE/UNet
                 if next(model.parameters()).is_cuda:

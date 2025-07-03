@@ -804,18 +804,22 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                 print("DEBUG: Cloth conditioning shape:", c_encoded.shape)
                 print("DEBUG: Unconditional conditioning shape:", uc.shape)
                 
-                # OPTIMIZED: Faster inference with balanced quality
-                guidance_scale = 5.0 if model_device.type == 'cpu' else 7.0  # Reduced for speed
-                print(f"DEBUG: Using OPTIMIZED guidance scale {guidance_scale} for faster inference!")
-                
-                # OPTIMIZED: Faster sampling parameters for reasonable quality
-                sampling_steps = 20  # Reduced from 50 for speed
+                # Dynamically choose sampling steps based on environment or device
+                sampling_env = os.getenv("SAMPLING_STEPS")
+                if sampling_env is not None and sampling_env.isdigit():
+                    sampling_steps = int(sampling_env)
+                else:
+                    sampling_steps = 30 if torch.cuda.is_available() else 50  # quality on CPU
                 eta_value = 0.0  # Deterministic for faster convergence
-                
-                print(f"DEBUG: OPTIMIZED sampling parameters:")
-                print(f"  ⚡ Guidance scale: {guidance_scale} (OPTIMIZED)")
-                print(f"  🎯 Sampling steps: {sampling_steps} (FAST)")
-                print(f"  🌟 Eta value: {eta_value} (DETERMINISTIC)")
+
+                # Slightly higher guidance for sharper results
+                if torch.cuda.is_available():
+                    guidance_scale = 7.5
+
+                print(f"DEBUG: SAMPLING parameters:")
+                print(f"  ⚡ Guidance scale: {guidance_scale}")
+                print(f"  🎯 Sampling steps: {sampling_steps}")
+                print(f"  🌟 Eta value: {eta_value}")
                 
                 # OPTIMIZED: Fast sampling for reasonable quality
                 print(f"🚀 Starting diffusion sampling with {sampling_steps} steps...")

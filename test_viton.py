@@ -510,6 +510,11 @@ def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path,
                         
                         # IMPROVED: Adapter fusion with proper shape handling
                         # The adapter expects specific input dimensions
+                        TARGET_HW = (28, 28)  # (H, W) expected by Embedding_Adapter
+                        if c_vae.dim() == 4 and c_vae.shape[-2:] != TARGET_HW:
+                            import torch.nn.functional as F
+                            c_vae = F.adaptive_avg_pool2d(c_vae, TARGET_HW)
+                            print(f"DEBUG: Pooled c_vae to {TARGET_HW} for adapter compatibility")
                         original_c_vae_shape = c_vae.shape
                         original_patches_shape = patches.shape
                         

@@ -320,7 +320,62 @@ def run_human_parser(input_image_path, output_mask_path):
         if cihp_dir in sys.path:
             sys.path.remove(cihp_dir)
 
+"""
+TryOn-Adapter ‑ Inference script for VITON-HD single-pair virtual try-on
+=======================================================================
+
+This script is an **extended / debug-friendly** version of the original
+`test_viton.py`.  It performs a *single* person-cloth inference run and is
+intended to be called from the API layer.  The changes compared to upstream
+include:
+
+•  EXTRA LOGGING – tons of `DEBUG:` prints so we can see tensor shapes,
+   statistics and where something explodes.
+•  ROBUST MEMORY MANAGEMENT – falls back to CPU if the GPU runs out of RAM; it
+   also enables PyTorch’s `max_split_size_mb` allocator, clears caches, etc.
+•  ADAPTER FUSION FIX – the original Embedding-Adapter expects a 28 × 28 latent
+   grid (784 tokens).  We therefore *adaptively pool* the VAE latent to the
+   right size before calling `model.fuse_adapter()`.
+•  MASK WORKAROUNDS – if the provided human-parsing mask is empty, we generate
+   a coarse torso rectangle so diffusion still has something to in-paint.
+
+CLI Arguments
+-------------
+
+    --person_image      Path to the resized (384×512) person JPG
+    --cloth_image       Path to the resized (384×512) clothing JPG
+    --mask              Grayscale PNG produced by the human-parsing stage
+    --output            Where to write `result.png`
+    --config, --ckpt    Stable-Diffusion-based config / checkpoint
+    --ckpt_elbm_path    Pre-trained VAE blend-fusion weights directory
+    --H, --W            Spatial size used by CP-VTON datasets (defaults 256×192)
+
+The pipeline entry point is `run_single_pair()` – see the docstring right
+below for an overview of every stage.
+"""
 def run_single_pair(person_image_path, cloth_image_path, mask_path, output_path, config_path, ckpt_path, ckpt_elbm_path, device, H=256, W=192):
+    """Run a **single** virtual try-on pair end-to-end.
+
+    1.  PRE-CONDITIONING
+        a. Load diffusion / VAE / CLIP model (optionally in half-precision).
+        b. Build an on-disk *mini-dataset* so `CPDataset` is happy.
+
+    2.  DATA PIPELINE (see the big loop further below):
+        ‑ Prepare in-paint tensors, warp features, masks, etc.
+        ‑ Convert raw cloth RGB to CLIP + VAE latents.
+        ‑ Optionally fuse VAE latent + CLIP tokens through the custom
+          `Embedding_Adapter` so cloth matches body shape.
+        ‑ Build conditioning dicts for UNet (9-channel in-paint scheme).
+        ‑ Run DDIM sampler with classifier-free guidance.
+        ‑ Decode to RGB and save *result.png*.
+
+    3.  Every step spits out `DEBUG:` logs with tensor shapes / stats so that
+        we can trace crashes (shape mismatches, NaNs, CUDA OOMs …).
+
+    NOTE: the function is extremely long because it contains many
+    workarounds.  When hunting for bugs, search for the **DEBUG:** tags – they
+    tell you exactly which branch is executing.
+    """
     # Ensure functional API is available throughout this function
     import torch.nn.functional as F
     try:
